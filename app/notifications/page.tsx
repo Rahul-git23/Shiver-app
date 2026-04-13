@@ -147,7 +147,14 @@ export default function NotificationsPage() {
             {notifications.map((notif) => (
               <button
                 key={notif.id}
-                onClick={() => markAsRead(notif.id)}
+                onClick={() => {
+                  markAsRead(notif.id);
+                  if (notif.type === 'room_share_approval') {
+                    window.location.href = '/sishya/stay/room-approval';
+                  } else if (notif.type === 'room_share_rejected') {
+                    window.location.href = '/sishya/stay/self-book';
+                  }
+                }}
                 className={`w-full text-left rounded-2xl shadow p-4 flex items-start gap-3 transition-all ${
                   notif.read ? 'bg-white' : 'bg-orange-50 border border-orange-200'
                 }`}>
