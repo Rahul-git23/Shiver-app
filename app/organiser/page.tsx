@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import PaymentApprovalPopup from '@/components/PaymentApprovalPopup';
 
 export default function OrganiserPage() {
   const [userData, setUserData] = useState<any>(null);
@@ -19,6 +20,7 @@ export default function OrganiserPage() {
   const [settlement, setSettlement] = useState<any>(null);
   const [shivirId, setShivirId] = useState<string>('');
   const [removalRequest, setRemovalRequest] = useState<any>(null);
+  const [hasPendingPayment, setHasPendingPayment] = useState(false);
   const [voting, setVoting] = useState(false);
   const [currentUserPhone, setCurrentUserPhone] = useState('');
 
@@ -39,8 +41,38 @@ export default function OrganiserPage() {
       // Get assigned Shivir
       const orgQ = query(collection(db, 'shivirOrganisers'), where('phone', '==', currentUser.phoneNumber));
       const orgSnap = await getDocs(orgQ);
+
+      // Check how many Shivirs this Aayojak is assigned to
+      const myShivirIds = orgSnap.docs.map(d => d.data().shivirId);
+
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      // If multiple Shivirs and none selected yet — go to selection page
+      const savedShivirId = localStorage.getItem('selectedShivirId');
+      if (myShivirIds.length > 1 && !savedShivirId) {
+        window.location.href = '/organiser/select-shivir';
+        return;
+      }
+
+      // If saved Shivir is no longer assigned — clear and reselect
+      if (savedShivirId && !myShivirIds.includes(savedShivirId)) {
+        localStorage.removeItem('selectedShivirId');
+        window.location.href = '/organiser/select-shivir';
+        return;
+      }
+
+      const selectedShivirId = savedShivirId || myShivirIds[0];
       if (!orgSnap.empty) {
-        const shivirId = orgSnap.docs[0].data().shivirId;
+        const shivirId = selectedShivirId;
+        // Check for pending payment approvals
+        const staySnap = await getDocs(collection(db, 'sishyaSelfStay'));
+        const pendingPayment = staySnap.docs.some(d =>
+          d.data().shivirId === shivirId &&
+          d.data().requestPayment === true &&
+          d.data().payStatus !== 'approved' &&
+          d.data().payStatus !== 'rejected'
+        );
+        setHasPendingPayment(pendingPayment);        
         const shivirQ = query(collection(db, 'shivirs'), where('__name__', '==', shivirId));
         const shivirSnap = await getDocs(shivirQ);
         if (!shivirSnap.empty) {
@@ -86,19 +118,19 @@ export default function OrganiserPage() {
           setStatsTasks(taskSnap.docs.filter(d => d.data().status !== 'done').length);
         }
       }
-// Get unread notification count
-      try {
-        const notifSnap = await getDocs(collection(db, 'notifications'));
-        const unread = notifSnap.docs.filter(d =>
-          d.data().userPhone === currentUser.phoneNumber && !d.data().read
-        ).length;
-        setUnreadCount(unread);
-      } catch (e) {}
+    // Get unread notification count
+          try {
+            const notifSnap = await getDocs(collection(db, 'notifications'));
+            const unread = notifSnap.docs.filter(d =>
+              d.data().userPhone === currentUser.phoneNumber && !d.data().read
+            ).length;
+            setUnreadCount(unread);
+          } catch (e) {}
 
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+          setLoading(false);
+        });
+        return () => unsubscribe();
+      }, []);
 
   const handleVote = async (vote: 'approve' | 'reject') => {
     if (!removalRequest || !currentUserPhone) return;
@@ -229,8 +261,18 @@ export default function OrganiserPage() {
                 </span>
               )}
             </button>
+            <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                localStorage.removeItem('selectedShivirId');
+                window.location.href = '/organiser/select-shivir';
+              }}
+              className="text-orange-500 text-xs font-medium border border-orange-300 px-2 py-1 rounded-lg">
+              Switch Shivir
+            </button>
             <button onClick={() => { auth.signOut(); window.location.href = '/login'; }}
               className="text-red-400 text-sm font-medium">Logout</button>
+          </div>
           </div>
         </div>
 
@@ -279,7 +321,7 @@ export default function OrganiserPage() {
             <p className="text-gray-400 text-sm mt-1">Please contact your coordinator</p>
           </div>
         )}
-
+        
         {/* Settlement Alert Card */}
         {settlement && settlement.status !== 'confirmed' && (
           <>
@@ -398,6 +440,12 @@ export default function OrganiserPage() {
         )}
 
       </div>
+
+      <PaymentApprovalPopup
+        organiserPhone={currentUserPhone}
+        shivirId={shivirId}
+      />
+
     </div>
   );
 }

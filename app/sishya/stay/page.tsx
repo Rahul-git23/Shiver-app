@@ -88,12 +88,12 @@ export default function StayPage() {
       if (orgPhones.length > 0) {
         const { createNotificationForMany } = await import('@/lib/notifications');
         await createNotificationForMany({
-          phones: orgPhones,
-          title: '🏨 Stay Remark from Sishya',
-          body: `A Sishya has added a remark about their stay arrangement.`,
-          type: 'stay_remark',
-          shivirId,
-        });
+        phones: orgPhones,
+        title: '💬 Stay Remark from Sishya',
+        body: `${userName || 'A Sishya'} Ji (${userPhone}) has added a remark about ${aayojakStay?.hotelName || 'their stay'}: "${remark.trim()}"`,
+        type: 'stay_remark',
+        shivirId,
+      });
       }
 
       setRemarkSaved(true);

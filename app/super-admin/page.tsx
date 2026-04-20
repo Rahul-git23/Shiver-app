@@ -514,6 +514,16 @@ export default function SuperAdminPage() {
                               ✏️ Edit Name
                             </button>
                             {u.status === 'pending' && (
+                              <button
+                                onClick={async () => {
+                                  await updateDoc(doc(db, 'users', u.id), { status: 'active' });
+                                  setUsers(users.map(x => x.id === u.id ? { ...x, status: 'active' } : x));
+                                }}
+                                className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-600 font-medium">
+                                ✅ Activate
+                              </button>
+                            )}
+                            {u.status === 'pending' && (
                               <button onClick={() => deleteUser(u.id, u.name)}
                                 className="text-xs px-3 py-1 rounded-full bg-red-50 text-red-500 font-medium">
                                 🗑️ Delete

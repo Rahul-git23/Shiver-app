@@ -59,8 +59,6 @@ export default function SelfBookPage() {
   const [allSishya, setAllSishya] = useState<any[]>([]);
   const [shivirStartDate, setShivirStartDate] = useState('');
   const [shivirEndDate, setShivirEndDate] = useState('');
-  const [shivirStartDate, setShivirStartDate] = useState('');
-  const [shivirEndDate, setShivirEndDate] = useState('');
   const [hotels, setHotels] = useState<SishyaBookingHotel[]>([emptyHotel()]);
   const [selectorOpen, setSelectorOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -89,25 +87,19 @@ export default function SelfBookPage() {
 
       const shivirSnap = await getDocs(collection(db, 'shivirs'));
       const shivirDoc = shivirSnap.docs.find(d => d.id === sid);
-      if (shivirDoc) setShivirName(shivirDoc.data().name);
+      if (shivirDoc) {
+        setShivirName(shivirDoc.data().name);
+        setShivirStartDate(shivirDoc.data().startDate || '');
+        setShivirEndDate(shivirDoc.data().endDate || '');
+      }
 
       const allSishyaList = sishyaSnap.docs
         .filter(d => d.data().shivirId === sid && d.data().phone !== phone)
         .map(d => d.data());
 
-        const meEntry = { phone: phone, name: 'Me', isMe: true };
-        setAllSishya([meEntry, ...allSishyaList]);
-
-        if (shivirDoc) {
-        setShivirStartDate(shivirDoc.data().startDate || '');
-        setShivirEndDate(shivirDoc.data().endDate || '');
-        }
-
-        // Store Shivir dates for date restrictions
-        if (shivirDoc) {
-        setShivirStartDate(shivirDoc.data().startDate || '');
-        setShivirEndDate(shivirDoc.data().endDate || '');
-        }
+      // Add "Me" as first option so booker can include themselves
+      const meEntry = { phone: phone, name: 'Me', isMe: true };
+      setAllSishya([meEntry, ...allSishyaList]);
 
       // Load existing bookings
       const selfStaySnap = await getDocs(collection(db, 'sishyaSelfStay'));
@@ -167,7 +159,6 @@ export default function SelfBookPage() {
     }));
   };
 
-  // Get all phones assigned across all rooms of ALL hotels except current context
   const getAssignedElsewhere = (hotelId: string, roomNumber: number) => {
     const phones: string[] = [];
     hotels.forEach(h => {
@@ -213,7 +204,6 @@ export default function SelfBookPage() {
       const { createNotificationForMany } = await import('@/lib/notifications');
 
       for (const hotel of hotels) {
-        // Upload invoice if new file
         let invoiceUrl = hotel.invoiceUrl;
         let invoiceName = hotel.invoiceName;
         if (hotel.invoiceFile) {
@@ -226,11 +216,12 @@ export default function SelfBookPage() {
           invoiceName = hotel.invoiceFile.name;
         }
 
-        // Collect all unique Sishya phones across all rooms
         const allAssignedPhones = Array.from(
           new Set(hotel.roomAssignments.flatMap(r => r.sishyaPhones))
         );
-        const isGroup = allAssignedPhones.length > 0;
+        // Group is anyone except "Me" (self)
+        const groupPhones = allAssignedPhones.filter(p => p !== userPhone);
+        const isGroup = groupPhones.length > 0;
 
         await setDoc(doc(db, 'sishyaSelfStay', hotel.id), {
           shivirId,
@@ -253,21 +244,21 @@ export default function SelfBookPage() {
         });
 
         if (isGroup) {
-          // For each room, notify each Sishya with their roommates
           for (const room of hotel.roomAssignments) {
-            if (room.sishyaPhones.length === 0) continue;
+            // Only notify real other Sishya — not self
+            const phonesToNotify = room.sishyaPhones.filter(p => p !== userPhone);
+            if (phonesToNotify.length === 0) continue;
 
-            for (const phone of room.sishyaPhones) {
+            for (const phone of phonesToNotify) {
               const approvalId = `${hotel.id}_room${room.roomNumber}_${phone}`;
 
-              // Only create approval doc if not already exists
               const appSnap = await getDocs(collection(db, 'sishyaRoomApprovals'));
               const exists = appSnap.docs.find(d => d.id === approvalId);
               if (!exists) {
-                // Roommates = everyone in this room except this Sishya
                 const roommatePhones = room.sishyaPhones.filter(p => p !== phone);
                 const roommateNames = roommatePhones
                   .map(p => {
+                    if (p === userPhone) return `${userName || 'Booker'} Ji`;
                     const s = allSishya.find(x => x.phone === p);
                     return s ? `${s.name} Ji` : p;
                   })
@@ -287,7 +278,6 @@ export default function SelfBookPage() {
                   createdAt: serverTimestamp(),
                 });
 
-                // Notify this Sishya
                 const roommateText = roommateNames
                   ? `You will be sharing with: ${roommateNames}.`
                   : 'You have been assigned this room.';
@@ -303,7 +293,7 @@ export default function SelfBookPage() {
             }
           }
         } else {
-          // Solo — notify Aayojak directly
+          // Solo or only "Me" selected — notify Aayojak directly
           const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
           const orgPhones = orgSnap.docs
             .filter(d => d.data().shivirId === shivirId)
@@ -333,37 +323,23 @@ export default function SelfBookPage() {
     setSaving(false);
   };
 
-  // Sishya date limits: 1 day before start, 1 day after end
-    const getMinCheckIn = () => {
-     if (!shivirStartDate) return '';
-     const d = new Date(shivirStartDate);
-     d.setDate(d.getDate() - 1);
-     return d.toISOString().split('T')[0];
-    };
-    const getMaxCheckOut = () => {
-     if (!shivirEndDate) return '';
-     const d = new Date(shivirEndDate);
-     d.setDate(d.getDate() + 1);
-     return d.toISOString().split('T')[0];
-    };
+  // Sishya: 1 day before start to start for check-in, end to 1 day after end for check-out
+  const sishyaMinCheckIn = (() => {
+    if (!shivirStartDate) return '';
+    const d = new Date(shivirStartDate);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  })();
 
-    const sishyaMinCheckIn = (() => {
-        if (!shivirStartDate) return '';
-        const d = new Date(shivirStartDate);
-      d.setDate(d.getDate() - 1);
-     return d.toISOString().split('T')[0];
-    })();
+  const sishyaMaxCheckIn = shivirStartDate;
+  const sishyaMinCheckOut = shivirEndDate;
 
-    const sishyaMaxCheckIn = shivirStartDate;
-
-    const sishyaMinCheckOut = shivirEndDate;
-
-    const sishyaMaxCheckOut = (() => {
+  const sishyaMaxCheckOut = (() => {
     if (!shivirEndDate) return '';
     const d = new Date(shivirEndDate);
     d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
-    })();
+  })();
 
   if (loading) return (
     <div className="min-h-screen bg-orange-50 flex items-center justify-center">
@@ -394,7 +370,6 @@ export default function SelfBookPage() {
         {hotels.map((hotel, index) => (
           <div key={hotel.id} className="bg-white rounded-2xl shadow p-5 mb-4">
 
-            {/* Card header */}
             <div className="flex items-center justify-between mb-4">
               <div className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full">
                 Hotel {index + 1} of {hotels.length}
@@ -438,10 +413,10 @@ export default function SelfBookPage() {
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-1">Check-in Date</label>
                 <input type="date" value={hotel.checkIn}
-                 onChange={e => updateHotel(hotel.id, 'checkIn', e.target.value)}
-                 min={sishyaMinCheckIn}
-                 max={sishyaMaxCheckIn}
-                 className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                  onChange={e => updateHotel(hotel.id, 'checkIn', e.target.value)}
+                  min={sishyaMinCheckIn}
+                  max={sishyaMaxCheckIn}
+                  className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-600 mb-1">Check-out Date</label>
@@ -449,7 +424,7 @@ export default function SelfBookPage() {
                   onChange={e => updateHotel(hotel.id, 'checkOut', e.target.value)}
                   min={sishyaMinCheckOut}
                   max={sishyaMaxCheckOut}
-                className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                  className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
               </div>
             </div>
 
@@ -479,27 +454,24 @@ export default function SelfBookPage() {
                 const isSoloRoom = hotel.rooms === 1 && room.sishyaPhones.length === 0;
 
                 return (
-                  <div key={room.roomNumber}
-                    className="border border-gray-100 rounded-xl p-3 mb-3">
+                  <div key={room.roomNumber} className="border border-gray-100 rounded-xl p-3 mb-3">
 
                     <p className="text-sm font-semibold text-gray-600 mb-2">
                       Room {room.roomNumber}
                       <span className="text-gray-400 font-normal ml-2 text-xs">
-                        ({room.sishyaPhones.length} Sishya selected)
+                        ({room.sishyaPhones.length} selected)
                       </span>
                     </p>
 
-                    {/* Solo booking note */}
-                    {isSoloRoom ? (
+                    {isSoloRoom && (
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-2">
                         <p className="text-blue-700 text-sm font-medium">🙏 Solo booking</p>
                         <p className="text-blue-600 text-xs mt-1">
                           Only you in this room. Aayojak will be notified directly when you submit.
                         </p>
                       </div>
-                    ) : null}
+                    )}
 
-                    {/* Selected chips */}
                     {room.sishyaPhones.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-2">
                         {room.sishyaPhones.map(phone => {
@@ -507,7 +479,7 @@ export default function SelfBookPage() {
                           return s ? (
                             <div key={phone}
                               className="flex items-center gap-1 bg-orange-50 border border-orange-200 rounded-full px-3 py-1 text-xs text-orange-700 font-medium">
-                              {s.name} Ji
+                              {s.isMe ? userName : `${s.name} Ji`}
                               <button
                                 onClick={() => toggleSishyaInRoom(hotel.id, room.roomNumber, phone)}
                                 className="text-orange-400 hover:text-orange-600 ml-1 font-bold">×</button>
@@ -539,7 +511,7 @@ export default function SelfBookPage() {
                                       : isSelected ? 'bg-orange-50 text-orange-700'
                                       : 'bg-white text-gray-700 hover:bg-gray-50'
                                   }`}>
-                                  <span>{s.name} Ji</span>
+                                  <span>{s.isMe ? 'Me (yourself)' : `${s.name} Ji`}</span>
                                   {isElsewhere
                                     ? <span className="text-xs text-gray-300">In another room</span>
                                     : isSelected

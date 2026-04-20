@@ -76,10 +76,18 @@ export default function TravelPage() {
       const phone = currentUser.phoneNumber!;
       setUserPhone(phone);
 
-      const sishyaQ = query(collection(db, 'shivirSishya'), where('phone', '==', phone));
-      const sishyaSnap = await getDocs(sishyaQ);
-      if (!sishyaSnap.empty) {
-        const sid = sishyaSnap.docs[0].data().shivirId;
+      const savedShivirId = localStorage.getItem('sishyaSelectedShivirId');
+      const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
+      const myShivirIds = sishyaSnap.docs
+        .filter(d => d.data().phone === phone)
+        .map(d => d.data().shivirId);
+
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId : myShivirIds[0];
+
+      if (sid) {
         setShivirId(sid);
 
         const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));

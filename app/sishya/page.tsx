@@ -27,11 +27,25 @@ export default function SishyaPage() {
       setUserData(user);
 
       // Get assigned Shivir
-      const sishyaQ = query(collection(db, 'shivirSishya'), where('phone', '==', currentUser.phoneNumber));
-      const sishyaSnap = await getDocs(sishyaQ);
-      if (!sishyaSnap.empty) {
-        const shivirId = sishyaSnap.docs[0].data().shivirId;
-        const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', shivirId)));
+      const savedShivirId = localStorage.getItem('sishyaSelectedShivirId');
+      const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
+      const myShivirIds = sishyaSnap.docs
+        .filter(d => d.data().phone === currentUser.phoneNumber)
+        .map(d => d.data().shivirId);
+
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      if (myShivirIds.length > 1 && !savedShivirId) {
+        window.location.href = '/sishya/select-shivir';
+        return;
+      }
+
+      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId : myShivirIds[0];
+
+      if (sid) {
+          const shivirId = sid;
+          const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', shivirId)));
         if (!shivirSnap.empty) {
           const shivirData = { id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() };
           setShivir(shivirData);
@@ -88,8 +102,18 @@ export default function SishyaPage() {
                 </span>
               )}
             </button>
+            <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                localStorage.removeItem('sishyaSelectedShivirId');
+                window.location.href = '/sishya/select-shivir';
+              }}
+              className="text-orange-500 text-xs font-medium border border-orange-300 px-2 py-1 rounded-lg">
+              Switch
+            </button>
             <button onClick={() => { auth.signOut(); window.location.href = '/login'; }}
               className="text-red-400 text-sm font-medium">Logout</button>
+          </div>
           </div>
         </div>
 

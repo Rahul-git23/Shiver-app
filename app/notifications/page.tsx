@@ -153,6 +153,8 @@ export default function NotificationsPage() {
                     window.location.href = '/sishya/stay/room-approval';
                   } else if (notif.type === 'room_share_rejected') {
                     window.location.href = '/sishya/stay/self-book';
+                  } else if (notif.type === 'stay_remark') {
+                    window.location.href = '/organiser/stay';
                   }
                 }}
                 className={`w-full text-left rounded-2xl shadow p-4 flex items-start gap-3 transition-all ${

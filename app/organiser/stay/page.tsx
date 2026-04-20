@@ -37,12 +37,11 @@ export default function StayManagementPage() {
   const [hotels, setHotels] = useState<HotelGroup[]>([emptyHotel()]);
   const [shivirStartDate, setShivirStartDate] = useState('');
   const [shivirEndDate, setShivirEndDate] = useState('');
-  const [shivirStartDate, setShivirStartDate] = useState('');
-  const [shivirEndDate, setShivirEndDate] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);  
   const [sishyaSelectorOpen, setSishyaSelectorOpen] = useState<string | null>(null);
+  const [remarks, setRemarks] = useState<any[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -50,21 +49,25 @@ export default function StayManagementPage() {
       const phone = currentUser.phoneNumber!;
       setOrganiserPhone(phone);
 
-      // Check role
       const usersSnap = await getDocs(collection(db, 'users'));
       const userDoc = usersSnap.docs.find(d => d.data().phone === phone);
       if (!userDoc || userDoc.data().role !== 'organiser') {
         window.location.href = '/access-denied'; return;
       }
 
-      // Get Shivir
+      const savedShivirId = localStorage.getItem('selectedShivirId');
       const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
-      const orgDoc = orgSnap.docs.find(d => d.data().phone === phone);
-      if (!orgDoc) { setLoading(false); return; }
-      const sid = orgDoc.data().shivirId;
+      const myShivirIds = orgSnap.docs
+        .filter(d => d.data().phone === phone)
+        .map(d => d.data().shivirId);
+
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId : myShivirIds[0];
+
       setShivirId(sid);
 
-      // Get Shivir name
       const shivirSnap = await getDocs(collection(db, 'shivirs'));
       const shivirDoc = shivirSnap.docs.find(d => d.id === sid);
       if (shivirDoc) {
@@ -72,22 +75,25 @@ export default function StayManagementPage() {
         setShivirStartDate(shivirDoc.data().startDate || '');
         setShivirEndDate(shivirDoc.data().endDate || '');
       }
-        setShivirStartDate(shivirDoc.data().startDate || '');
-        setShivirEndDate(shivirDoc.data().endDate || '');
-      }
-      // Get Sishya list
+
       const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
       const list = sishyaSnap.docs
         .filter(d => d.data().shivirId === sid)
         .map(d => d.data());
       setSishyaList(list);
 
-      // Load existing hotel groups
       const staySnap = await getDocs(collection(db, 'sishyaStayGroups'));
       const existing = staySnap.docs
         .filter(d => d.data().shivirId === sid)
         .map(d => ({ id: d.id, ...d.data() } as HotelGroup));
       if (existing.length > 0) setHotels(existing);
+
+      // Load Sishya remarks
+      const remarkSnap = await getDocs(collection(db, 'sishyaStayRemarks'));
+      const shivirRemarks = remarkSnap.docs
+        .filter(d => d.data().shivirId === sid)
+        .map(d => d.data());
+      setRemarks(shivirRemarks);
 
       setLoading(false);
     });
@@ -118,9 +124,7 @@ export default function StayManagementPage() {
   const removeHotel = async (id: string) => {
     if (!confirm('Remove this hotel?')) return;
     setHotels(prev => prev.filter(h => h.id !== id));
-    try {
-      await deleteDoc(doc(db, 'sishyaStayGroups', id));
-    } catch (e) {}
+    try { await deleteDoc(doc(db, 'sishyaStayGroups', id)); } catch (e) {}
   };
 
   const saveHotel = async (hotel: HotelGroup) => {
@@ -151,7 +155,6 @@ export default function StayManagementPage() {
     setSaving(null);
   };
 
-  // Find which Sishya are already assigned to OTHER hotels (to show as unavailable)
   const getAssignedElsewhere = (currentHotelId: string) => {
     const assigned: string[] = [];
     hotels.forEach(h => {
@@ -160,20 +163,8 @@ export default function StayManagementPage() {
     return assigned;
   };
 
-  // Aayojak date limits: 3 days before start, 2 days after end
-  const getAayojakMinCheckIn = () => {
-    if (!shivirStartDate) return '';
-    const d = new Date(shivirStartDate);
-    d.setDate(d.getDate() - 3);
-    return d.toISOString().split('T')[0];
-  };
-  const getAayojakMaxCheckOut = () => {
-    if (!shivirEndDate) return '';
-    const d = new Date(shivirEndDate);
-    d.setDate(d.getDate() + 2);
-    return d.toISOString().split('T')[0];
-  };
-
+  // Aayojak: 3 days before start to start date for check-in
+  // Aayojak: end date to 2 days after end for check-out
   const aayojakMinCheckIn = (() => {
     if (!shivirStartDate) return '';
     const d = new Date(shivirStartDate);
@@ -182,7 +173,6 @@ export default function StayManagementPage() {
   })();
 
   const aayojakMaxCheckIn = shivirStartDate;
-
   const aayojakMinCheckOut = shivirEndDate;
 
   const aayojakMaxCheckOut = (() => {
@@ -217,16 +207,24 @@ export default function StayManagementPage() {
           <p className="text-xs text-orange-500 font-semibold uppercase mb-2">Sishya Overview</p>
           <div className="flex flex-wrap gap-2">
             {sishyaList.map(s => {
-              const assignedTo = hotels.find(h => h.sishyaPhones.includes(s.phone));
-              return (
-                <div key={s.phone}
-                  className={`text-xs px-3 py-1 rounded-full font-medium ${
-                    assignedTo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                  }`}>
+            const assignedTo = hotels.find(h => h.sishyaPhones.includes(s.phone));
+            const sishyaRemark = remarks.find(r => r.phone === s.phone);
+            return (
+              <div key={s.phone} className="w-full">
+                <div className={`text-xs px-3 py-1 rounded-full font-medium inline-block ${
+                  assignedTo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                }`}>
                   {assignedTo ? '✓' : '·'} {s.name} Ji
                 </div>
-              );
-            })}
+                {sishyaRemark && (
+                  <div className="mt-1 ml-1 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2">
+                    <p className="text-xs text-yellow-800 font-semibold mb-0.5">💬 Remark from {s.name} Ji</p>
+                    <p className="text-xs text-yellow-700">{sishyaRemark.remark}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           </div>
           <p className="text-xs text-gray-400 mt-2">
             {hotels.reduce((acc, h) => acc + h.sishyaPhones.length, 0)} of {sishyaList.length} Sishya assigned to a hotel
@@ -242,7 +240,6 @@ export default function StayManagementPage() {
           return (
             <div key={hotel.id} className="bg-white rounded-2xl shadow p-5 mb-4">
 
-              {/* Hotel card header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full">
                   Hotel {index + 1} of {hotels.length}
@@ -255,7 +252,6 @@ export default function StayManagementPage() {
                 )}
               </div>
 
-              {/* Hotel name */}
               <p className="text-xs text-orange-500 font-semibold uppercase mb-3">Accommodation Details</p>
 
               <div className="mb-3">
@@ -289,27 +285,27 @@ export default function StayManagementPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-1">Check-in Date</label>
-                <input
-                  type="date"
-                  value={hotel.checkIn}
-                  onChange={e => updateHotel(hotel.id, 'checkIn', e.target.value)}
-                  min={aayojakMinCheckIn}
-                  max={aayojakMaxCheckIn}
-                  className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                <div>
+                  <label className="block text-sm font-semibold text-gray-600 mb-1">Check-in Date</label>
+                  <input
+                    type="date"
+                    value={hotel.checkIn}
+                    onChange={e => updateHotel(hotel.id, 'checkIn', e.target.value)}
+                    min={aayojakMinCheckIn}
+                    max={aayojakMaxCheckIn}
+                    className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-600 mb-1">Check-out Date</label>
+                  <input
+                    type="date"
+                    value={hotel.checkOut}
+                    onChange={e => updateHotel(hotel.id, 'checkOut', e.target.value)}
+                    min={aayojakMinCheckOut}
+                    max={aayojakMaxCheckOut}
+                    className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-600 mb-1">Check-out Date</label>
-                <input
-                  type="date"
-                  value={hotel.checkOut}
-                  onChange={e => updateHotel(hotel.id, 'checkOut', e.target.value)}
-                  min={aayojakMinCheckOut}
-                  max={aayojakMaxCheckOut}
-                  className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
-              </div>
-            </div>
 
               {/* Room counter */}
               <div className="mb-4">
@@ -336,7 +332,6 @@ export default function StayManagementPage() {
                   <span className="text-gray-400 font-normal ml-1">({hotel.sishyaPhones.length} selected)</span>
                 </label>
 
-                {/* Selected chips */}
                 {hotel.sishyaPhones.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {hotel.sishyaPhones.map(phone => {
@@ -353,14 +348,12 @@ export default function StayManagementPage() {
                   </div>
                 )}
 
-                {/* Add Sishya button */}
                 <button
                   onClick={() => setSishyaSelectorOpen(sishyaSelectorOpen === hotel.id ? null : hotel.id)}
                   className="w-full border border-dashed border-orange-300 rounded-xl p-3 text-sm text-orange-500 hover:bg-orange-50 text-left">
                   {sishyaSelectorOpen === hotel.id ? '▲ Close list' : '▼ Select Sishya for this hotel'}
                 </button>
 
-                {/* Sishya dropdown list */}
                 {sishyaSelectorOpen === hotel.id && (
                   <div className="border border-gray-200 rounded-xl mt-1 overflow-hidden">
                     {sishyaList.length === 0 ? (
@@ -406,7 +399,6 @@ export default function StayManagementPage() {
                   className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400 resize-none" />
               </div>
 
-              {/* Save button */}
               <button
                 onClick={() => saveHotel(hotel)}
                 disabled={isSaving}
@@ -422,7 +414,6 @@ export default function StayManagementPage() {
           );
         })}
 
-        {/* Add another hotel button */}
         <button
           onClick={addHotel}
           className="w-full border-2 border-dashed border-orange-300 rounded-2xl p-4 text-orange-500 font-semibold text-sm hover:bg-orange-50 mb-6">

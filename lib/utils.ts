@@ -101,3 +101,23 @@ export function formatShivirLocation(city: string, state: string): string {
   const code = getStateCode(state);
   return `${city} (${code})`;
 }
+
+// Returns the Aayojak's selected Shivir ID from localStorage
+// Falls back to first assigned Shivir if nothing saved
+export const getSelectedShivirId = async (
+  phone: string,
+  db: any,
+  collection: any,
+  getDocs: any
+): Promise<string | null> => {
+  const saved = localStorage.getItem('selectedShivirId');
+  if (saved) return saved;
+
+  const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
+  const myDoc = orgSnap.docs.find((d: any) => d.data().phone === phone);
+  if (!myDoc) return null;
+
+  const sid = myDoc.data().shivirId;
+  localStorage.setItem('selectedShivirId', sid);
+  return sid;
+};

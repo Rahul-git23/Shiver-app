@@ -21,11 +21,16 @@ export default function SettlementPage() {
       setCurrentUser(user);
 
       // Get organiser's shivir
-      const orgQ = query(collection(db, 'shivirOrganisers'), where('phone', '==', user.phoneNumber));
-      const orgSnap = await getDocs(orgQ);
-      if (orgSnap.empty) { setLoading(false); return; }
+    const savedShivirId = localStorage.getItem('selectedShivirId');
+    const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
+    const myShivirIds = orgSnap.docs
+      .filter(d => d.data().phone === user.phoneNumber)
+      .map(d => d.data().shivirId);
 
-      const shivirId = orgSnap.docs[0].data().shivirId;
+    if (myShivirIds.length === 0) { setLoading(false); return; }
+
+    const shivirId = (savedShivirId && myShivirIds.includes(savedShivirId))
+      ? savedShivirId : myShivirIds[0];
 
       // Get pending settlement
       const settlSnap = await getDocs(query(

@@ -26,11 +26,17 @@ export default function OrganiserSishyaPage() {
       }
 
       // Get organiser's Shivir
+      const savedShivirId = localStorage.getItem('selectedShivirId');
       const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
-      const orgDoc = orgSnap.docs.find(d => d.data().phone === phone);
-      if (!orgDoc) { setLoading(false); return; }
+      const myShivirIds = orgSnap.docs
+        .filter(d => d.data().phone === phone)
+        .map(d => d.data().shivirId);
 
-      const sid = orgDoc.data().shivirId;
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId : myShivirIds[0];
+
       setShivirId(sid);
 
       // Get Shivir name
