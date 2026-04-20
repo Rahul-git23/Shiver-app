@@ -30,6 +30,9 @@ export default function GurudhamUpdatesPage() {
   const [handoverSishya, setHandoverSishya] = useState('');
   const [handoverBundles, setHandoverBundles] = useState('');
   const [savingHandover, setSavingHandover] = useState(false);
+  const [returns, setReturns] = useState<any[]>([]);
+  const [confirmingReturn, setConfirmingReturn] = useState<string | null>(null);
+  const [savingReturnConfirm, setSavingReturnConfirm] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -95,6 +98,13 @@ export default function GurudhamUpdatesPage() {
             .filter(d => d.data().shivirId === sid && d.data().handedBy === phone)
             .map(d => ({ id: d.id, ...d.data() }));
           setHandovers(myHandovers);
+
+          // Get existing returns from Sishya
+          const returnsSnap = await getDocs(collection(db, 'samagriReturns'));
+          const myReturns = returnsSnap.docs
+            .filter(d => d.data().shivirId === sid && d.data().returnedTo === phone)
+            .map(d => ({ id: d.id, ...d.data() }));
+          setReturns(myReturns);
         }
       }
       setLoading(false);
@@ -343,13 +353,65 @@ export default function GurudhamUpdatesPage() {
                       <div className="p-4 border-t border-gray-100">
                         {myHandover ? (
                           <div className={`rounded-xl p-3 ${myHandover.confirmedBySishya ? 'bg-green-50' : 'bg-blue-50'}`}>
-                            <p className={`text-sm font-semibold ${myHandover.confirmedBySishya ? 'text-green-700' : 'text-blue-700'}`}>
-                              {myHandover.confirmedBySishya ? '✅ Sishya confirmed receipt' : '⏳ Handed over — awaiting Sishya confirmation'}
-                            </p>
-                            <p className={`text-xs mt-1 ${myHandover.confirmedBySishya ? 'text-green-600' : 'text-blue-600'}`}>
-                              {myHandover.bundlesHandedOver} bundles → {myHandover.handedToName} Ji
-                            </p>
-                          </div>
+                          <p className={`text-sm font-semibold ${myHandover.confirmedBySishya ? 'text-green-700' : 'text-blue-700'}`}>
+                            {myHandover.confirmedBySishya ? '✅ Sishya confirmed receipt' : '⏳ Handed over — awaiting Sishya confirmation'}
+                          </p>
+                          <p className={`text-xs mt-1 ${myHandover.confirmedBySishya ? 'text-green-600' : 'text-blue-600'}`}>
+                            {myHandover.bundlesHandedOver} bundles → {myHandover.handedToName} Ji
+                          </p>
+                        </div>
+
+                        {/* Return from Sishya */}
+                        {returns.find(r => r.handoverId === myHandover.id) && (() => {
+                          const myReturn = returns.find(r => r.handoverId === myHandover.id)!;
+                          return myReturn.confirmedByAayojak ? (
+                            <div className="bg-green-50 rounded-xl p-3 mt-2">
+                              <p className="text-green-700 text-sm font-semibold">✅ Return confirmed</p>
+                              <p className="text-green-600 text-xs">{myReturn.bundlesReturned} bundles returned by {myHandover.handedToName} Ji</p>
+                            </div>
+                          ) : (
+                            <div className="bg-orange-50 rounded-xl p-3 mt-2">
+                              <p className="text-orange-700 text-sm font-semibold">📤 Sishya is returning bundles</p>
+                              <p className="text-orange-600 text-xs mb-2">{myReturn.bundlesReturned} bundles from {myHandover.handedToName} Ji</p>
+                              {confirmingReturn === myReturn.id ? (
+                                <div className="flex gap-2">
+                                  <button onClick={() => setConfirmingReturn(null)}
+                                    className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-xs">
+                                    Cancel
+                                  </button>
+                                  <button
+                                    disabled={savingReturnConfirm}
+                                    onClick={async () => {
+                                      setSavingReturnConfirm(true);
+                                      try {
+                                        await updateDoc(doc(db, 'samagriReturns', myReturn.id), {
+                                          confirmedByAayojak: true,
+                                          confirmedByAayojakAt: serverTimestamp(),
+                                        });
+                                        await updateDoc(doc(db, 'samagriHandovers', myHandover.id), {
+                                          returnedBySishya: true,
+                                          bundlesReturned: myReturn.bundlesReturned,
+                                        });
+                                        setReturns(prev => prev.map(r =>
+                                          r.id === myReturn.id ? { ...r, confirmedByAayojak: true } : r
+                                        ));
+                                        setConfirmingReturn(null);
+                                      } catch (e) { alert('Could not confirm. Try again.'); }
+                                      setSavingReturnConfirm(false);
+                                    }}
+                                    className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-xs disabled:opacity-50">
+                                    {savingReturnConfirm ? 'Confirming...' : '✅ Confirm Receipt'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button onClick={() => setConfirmingReturn(myReturn.id)}
+                                  className="w-full bg-orange-500 text-white font-bold py-2 rounded-xl text-xs">
+                                  ✅ Confirm I Received {myReturn.bundlesReturned} Bundles Back
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                         ) : (
                           <>
                             {showHandover === s.id ? (
