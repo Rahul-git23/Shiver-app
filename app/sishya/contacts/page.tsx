@@ -22,10 +22,15 @@ export default function ContactsPage() {
 
       const phone = currentUser.phoneNumber!;
 
-      const sishyaQ = query(collection(db, 'shivirSishya'), where('phone', '==', phone));
-      const sishyaSnap = await getDocs(sishyaQ);
-      if (!sishyaSnap.empty) {
-        const sid = sishyaSnap.docs[0].data().shivirId;
+      const savedShivirId = localStorage.getItem('sishyaSelectedShivirId');
+      const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
+      const myShivirIds = sishyaSnap.docs
+        .filter(d => d.data().phone === phone)
+        .map(d => d.data().shivirId);
+
+      if (myShivirIds.length > 0) {
+        const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+          ? savedShivirId : myShivirIds[0];
 
         const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));
         if (!shivirSnap.empty) setShivirName(shivirSnap.docs[0].data().name);

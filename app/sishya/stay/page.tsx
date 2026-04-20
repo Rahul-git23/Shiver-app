@@ -13,6 +13,7 @@ export default function StayPage() {
   const [remark, setRemark] = useState('');
   const [remarkSaving, setRemarkSaving] = useState(false);
   const [remarkSaved, setRemarkSaved] = useState(false);
+  const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,13 +29,20 @@ export default function StayPage() {
       if (!userDoc || userDoc.data().role !== 'sishya') {
         window.location.href = '/access-denied'; return;
       }
+      setUserName(userDoc.data().name || '');
 
       // Get assigned Shivir
+      const savedShivirId = localStorage.getItem('sishyaSelectedShivirId');
       const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
-      const sishyaDoc = sishyaSnap.docs.find(d => d.data().phone === phone);
-      if (!sishyaDoc) { setLoading(false); return; }
+      const myShivirIds = sishyaSnap.docs
+        .filter(d => d.data().phone === phone)
+        .map(d => d.data().shivirId);
 
-      const sid = sishyaDoc.data().shivirId;
+      if (myShivirIds.length === 0) { setLoading(false); return; }
+
+      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId : myShivirIds[0];
+
       setShivirId(sid);
 
       // Get Shivir name
