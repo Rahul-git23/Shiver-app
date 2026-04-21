@@ -26,6 +26,11 @@ export default function ShivirDetailPage({ params }: { params: Promise<{ id: str
   const [settlements, setSettlements] = useState<any[]>([]);
   const [leadAayojakPhone, setLeadAayojakPhone] = useState('');
 
+  // Closure state
+  const [samagriReturnConfirmedByDispatch, setSamagriReturnConfirmedByDispatch] = useState(false);
+  const [closingShivir, setClosingShivir] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) { window.location.href = '/login'; return; }
@@ -80,6 +85,11 @@ export default function ShivirDetailPage({ params }: { params: Promise<{ id: str
     // Load settlements
     const settlementsData = await getShivirSettlements(id);
     setSettlements(settlementsData as any[]);
+
+    // Check if dispatch confirmed samagri return
+    const rtgSnap = await getDocs(query(collection(db, 'samagriReturnToGurudham'), where('shivirId', '==', id)));
+    const dispatchConfirmed = rtgSnap.docs.some(d => d.data().dispatchConfirmed === true);
+    setSamagriReturnConfirmedByDispatch(dispatchConfirmed);
   };
 
   // Computed values
@@ -273,6 +283,130 @@ export default function ShivirDetailPage({ params }: { params: Promise<{ id: str
           </div>
 
         </div>
+
+        {/* ── Shivir Closure Card ── */}
+        {!isAdminViewer && (() => {
+          const settlementDone = remainingToSettle <= 0 && balance > 0;
+          const samagriDone = samagriReturnConfirmedByDispatch;
+          const alreadyClosed = shivir?.status === 'closed';
+          const readyToClose = settlementDone && samagriDone;
+
+          if (alreadyClosed) {
+            return (
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-5 mb-4 text-center">
+                <p className="text-2xl mb-2">🕉️</p>
+                <p className="text-green-700 font-bold text-base">Shivir Closed</p>
+                <p className="text-green-600 text-sm mt-1">All Aayojaks have been deactivated.</p>
+                <p className="text-green-500 text-xs mt-1">They can be reactivated when assigned to a new Shivir.</p>
+              </div>
+            );
+          }
+
+          return (
+            <div className="bg-white rounded-2xl shadow p-4 mb-4">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-lg">🔒</span>
+                <h2 className="font-bold text-gray-700">Shivir Closure</h2>
+              </div>
+
+              {/* Settlement status row */}
+              <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                <div>
+                  <p className="text-sm text-gray-600">Settlement</p>
+                  <p className="text-xs text-gray-400">Remaining balance = ₹0</p>
+                </div>
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                  settlementDone ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {settlementDone ? '✅ Done' : '⏳ Pending'}
+                </span>
+              </div>
+
+              {/* Samagri return status row */}
+              <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                <div>
+                  <p className="text-sm text-gray-600">Samagri Return</p>
+                  <p className="text-xs text-gray-400">Dispatch confirmed receipt</p>
+                </div>
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                  samagriDone ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  {samagriDone ? '✅ Confirmed' : '❌ Not confirmed'}
+                </span>
+              </div>
+
+              {/* Close button or disabled state */}
+              {readyToClose ? (
+                <div className="mt-4">
+                  {showCloseConfirm ? (
+                    <div className="bg-red-50 rounded-xl p-4 space-y-3">
+                      <p className="text-red-700 font-semibold text-sm">⚠️ Are you sure?</p>
+                      <p className="text-red-600 text-xs">
+                        This will permanently close the Shivir and deactivate all {organisers.length} Aayojak accounts.
+                        They can be reactivated later when assigned to a new Shivir.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setShowCloseConfirm(false)}
+                          className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
+                          Cancel
+                        </button>
+                        <button
+                          disabled={closingShivir}
+                          onClick={async () => {
+                            setClosingShivir(true);
+                            try {
+                              const { updateDoc, doc, writeBatch } = await import('firebase/firestore');
+                              const batch = writeBatch(db);
+
+                              // Close the Shivir
+                              batch.update(doc(db, 'shivirs', shivirId), { status: 'closed' });
+
+                              // Deactivate all Aayojaks
+                              for (const org of organisers) {
+                                const uSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', org.phone)));
+                                if (!uSnap.empty) {
+                                  batch.update(doc(db, 'users', uSnap.docs[0].id), { status: 'deactivated' });
+                                }
+                                // Remove from shivirOrganisers
+                                batch.delete(doc(db, 'shivirOrganisers', org.id));
+                              }
+
+                              await batch.commit();
+
+                              setShivir((prev: any) => ({ ...prev, status: 'closed' }));
+                              setShowCloseConfirm(false);
+                            } catch (e) {
+                              alert('Could not close Shivir. Please try again.');
+                            }
+                            setClosingShivir(false);
+                          }}
+                          className="flex-1 bg-red-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
+                          {closingShivir ? 'Closing...' : 'Yes, Close Shivir'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowCloseConfirm(true)}
+                      className="w-full bg-red-500 text-white font-bold py-3 rounded-xl text-sm">
+                      🔒 Close Shivir
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <div className="w-full bg-gray-100 text-gray-400 font-semibold py-3 rounded-xl text-sm text-center">
+                    🔒 Close Shivir — conditions not met
+                  </div>
+                  <p className="text-xs text-gray-400 text-center mt-2">
+                    Both settlement and samagri return must be complete
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Settlement Card - Full Width */}
         <div onClick={() => goTo('settlement')}
