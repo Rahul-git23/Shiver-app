@@ -3,6 +3,8 @@
 import { formatShivirDates, formatShivirLocation } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
+import { getStorage } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -14,7 +16,6 @@ export default function GurudhamUpdatesPage() {
   const [samagriList, setSamagriList] = useState<any[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
   const [handovers, setHandovers] = useState<any[]>([]);
-  const [returns, setReturns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedSishya, setExpandedSishya] = useState<string | null>(null);
 
@@ -30,9 +31,17 @@ export default function GurudhamUpdatesPage() {
   const [handoverBundles, setHandoverBundles] = useState('');
   const [savingHandover, setSavingHandover] = useState(false);
 
-  // Return confirmation state
-  const [confirmingReturn, setConfirmingReturn] = useState<string | null>(null);
+  // Step 4 state
+  const [returns, setReturns] = useState<any[]>([]);
+  const [returnConfirmed, setReturnConfirmed] = useState<string[]>([]);
   const [savingReturnConfirm, setSavingReturnConfirm] = useState(false);
+
+  // Step 5 state
+  const [returnToGurudham, setReturnToGurudham] = useState<any[]>([]);
+  const [extraBundles, setExtraBundles] = useState<Record<string, number>>({});
+  const [biltyImage, setBiltyImage] = useState<Record<string, File | null>>({});
+  const [biltyPreview, setBiltyPreview] = useState<Record<string, string>>({});
+  const [savingReturn5, setSavingReturn5] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -54,17 +63,19 @@ export default function GurudhamUpdatesPage() {
 
       if (myShivirIds.length === 0) { setLoading(false); return; }
 
-      const selectedId = (savedShivirId && myShivirIds.includes(savedShivirId))
-        ? savedShivirId : myShivirIds[0];
+      const shivirId = (savedShivirId && myShivirIds.includes(savedShivirId))
+        ? savedShivirId
+        : myShivirIds[0];
 
-      if (selectedId) {
-        const sid = selectedId;
+      if (shivirId) {
+        const sid = shivirId;
         setShivirId(sid);
 
         const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));
         if (!shivirSnap.empty) {
           setShivir({ id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() });
 
+          // Get Sishya assigned to this Shivir
           const sishyaQ = query(collection(db, 'shivirSishya'), where('shivirId', '==', sid));
           const sishyaSnap = await getDocs(sishyaQ);
           const sishyaIds = sishyaSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -78,34 +89,134 @@ export default function GurudhamUpdatesPage() {
           }
           setSishyaList(sishyaDetails);
 
+          // Get Samagri dispatches for this Shivir
           const samagriQ = query(collection(db, 'logistics'), where('shivirId', '==', sid));
           const samagriSnap = await getDocs(samagriQ);
           setSamagriList(samagriSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
+          // Get existing receipts confirmed by this Aayojak
           const receiptSnap = await getDocs(collection(db, 'samagriReceipts'));
           const myReceipts = receiptSnap.docs
             .filter(d => d.data().shivirId === sid && d.data().confirmedBy === phone)
             .map(d => ({ id: d.id, ...d.data() }));
           setReceipts(myReceipts);
 
+          // Get existing handovers
           const handoverSnap = await getDocs(collection(db, 'samagriHandovers'));
           const myHandovers = handoverSnap.docs
             .filter(d => d.data().shivirId === sid && d.data().handedBy === phone)
             .map(d => ({ id: d.id, ...d.data() }));
           setHandovers(myHandovers);
 
-          // Load returns from Sishya
+          // Step 4 — Get samagriReturns from Sishya
           const returnsSnap = await getDocs(collection(db, 'samagriReturns'));
           const myReturns = returnsSnap.docs
             .filter(d => d.data().shivirId === sid && d.data().returnedTo === phone)
             .map(d => ({ id: d.id, ...d.data() }));
           setReturns(myReturns);
+
+          // Step 4 — Get already confirmed returns
+          const returnConfirmSnap = await getDocs(collection(db, 'samagriReturnConfirmed'));
+          const confirmedIds = returnConfirmSnap.docs
+            .filter(d => d.data().shivirId === sid && d.data().confirmedBy === phone)
+            .map(d => d.data().logisticsId);
+          setReturnConfirmed(confirmedIds);
+
+          // Step 5 — Get already submitted returnToGurudham records
+          const rtgSnap = await getDocs(collection(db, 'samagriReturnToGurudham'));
+          const myRtg = rtgSnap.docs
+            .filter(d => d.data().shivirId === sid && d.data().sentBy === phone)
+            .map(d => ({ id: d.id, ...d.data() }));
+          setReturnToGurudham(myRtg);
         }
       }
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
+
+  const confirmReturnFromSishya = async (samagri: any, sishyaReturn: any) => {
+    setSavingReturnConfirm(true);
+    try {
+      const confirmId = `${samagri.id}_returnconfirm_${organiserPhone}`;
+      await setDoc(doc(db, 'samagriReturnConfirmed', confirmId), {
+        logisticsId: samagri.id,
+        shivirId,
+        confirmedBy: organiserPhone,
+        bundlesReturned: sishyaReturn.bundlesReturned,
+        returnedBy: sishyaReturn.returnedBy,
+        confirmedAt: serverTimestamp(),
+      });
+
+      setReturnConfirmed(prev => [...prev, samagri.id]);
+
+      const { createNotificationForMany } = await import('@/lib/notifications');
+      await createNotificationForMany({
+        phones: [sishyaReturn.returnedBy],
+        title: '✅ Return Confirmed',
+        body: `Aayojak has confirmed receipt of your returned bundles.`,
+        type: 'samagri_return_confirmed',
+        shivirId,
+      });
+    } catch (e) {
+      alert('Could not save. Please try again.');
+    }
+    setSavingReturnConfirm(false);
+  };
+
+  const sendToGurudham = async (samagri: any, sishyaReturn: any) => {
+    const extra = extraBundles[samagri.id] || 0;
+    const total = sishyaReturn.bundlesReturned + extra;
+    setSavingReturn5(true);
+    try {
+      let biltyUrl = '';
+      const imageFile = biltyImage[samagri.id];
+      if (imageFile) {
+        const storage = getStorage();
+        const storageRef = ref(storage, `samagri/bilty/${shivirId}/${samagri.id}_${organiserPhone}`);
+        await uploadBytes(storageRef, imageFile);
+        biltyUrl = await getDownloadURL(storageRef);
+      }
+      const rtgId = `${samagri.id}_rtg_${organiserPhone}`;
+      await setDoc(doc(db, 'samagriReturnToGurudham', rtgId), {
+        logisticsId: samagri.id,
+        shivirId,
+        sentBy: organiserPhone,
+        bundlesFromSishya: sishyaReturn.bundlesReturned,
+        extraGiftBundles: extra,
+        totalBundlesSent: total,
+        biltyImageUrl: biltyUrl,
+        dispatchConfirmed: false,
+        sentAt: serverTimestamp(),
+      });
+      setReturnToGurudham(prev => [...prev, {
+        id: rtgId,
+        logisticsId: samagri.id,
+        bundlesFromSishya: sishyaReturn.bundlesReturned,
+        extraGiftBundles: extra,
+        totalBundlesSent: total,
+        biltyImageUrl: biltyUrl,
+        dispatchConfirmed: false,
+      }]);
+      const { createNotificationForMany } = await import('@/lib/notifications');
+      const dispatchSnap = await getDocs(collection(db, 'users'));
+      const dispatchPhones = dispatchSnap.docs
+        .filter(d => d.data().role === 'dispatch')
+        .map(d => d.data().phone);
+      if (dispatchPhones.length > 0) {
+        await createNotificationForMany({
+          phones: dispatchPhones,
+          title: '📦 Samagri Returning to Gurudham',
+          body: `Aayojak is sending ${total} bundles back to Gurudham for ${shivir?.name}.`,
+          type: 'samagri_return_to_gurudham',
+          shivirId,
+        });
+      }
+    } catch (e) {
+      alert('Could not save. Please try again.');
+    }
+    setSavingReturn5(false);
+  };
 
   const confirmReceipt = async (samagri: any) => {
     if (!receiptBundles || Number(receiptBundles) <= 0) {
@@ -215,27 +326,6 @@ export default function GurudhamUpdatesPage() {
     setSavingHandover(false);
   };
 
-  const confirmReturnFromSishya = async (myReturn: any, handoverId: string) => {
-    setSavingReturnConfirm(true);
-    try {
-      await updateDoc(doc(db, 'samagriReturns', myReturn.id), {
-        confirmedByAayojak: true,
-        confirmedByAayojakAt: serverTimestamp(),
-      });
-      await updateDoc(doc(db, 'samagriHandovers', handoverId), {
-        returnedBySishya: true,
-        bundlesReturned: myReturn.bundlesReturned,
-      });
-      setReturns(prev => prev.map(r =>
-        r.id === myReturn.id ? { ...r, confirmedByAayojak: true } : r
-      ));
-      setConfirmingReturn(null);
-    } catch (e) {
-      alert('Could not confirm. Please try again.');
-    }
-    setSavingReturnConfirm(false);
-  };
-
   const formatDate = (dateStr: string) => {
     if (!dateStr) return 'Not updated yet';
     return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -280,8 +370,12 @@ export default function GurudhamUpdatesPage() {
               {samagriList.map((s: any) => {
                 const myReceipt = receipts.find(r => r.logisticsId === s.id);
                 const myHandover = handovers.find(h => h.logisticsId === s.id);
+                const sishyaReturn = returns.find(r => r.logisticsId === s.id);
                 const isConfirmed = s.aayojakConfirmed || !!myReceipt;
-                const myReturn = myHandover ? returns.find(r => r.handoverId === myHandover.id) : null;
+                const isReturnConfirmed = returnConfirmed.includes(s.id);
+                const rtgRecord = returnToGurudham.find(r => r.logisticsId === s.id);
+                const extra = extraBundles[s.id] || 0;
+                const total = (sishyaReturn?.bundlesReturned || 0) + extra;
 
                 return (
                   <div key={s.id} className="border border-orange-100 rounded-xl overflow-hidden">
@@ -322,14 +416,18 @@ export default function GurudhamUpdatesPage() {
                             <p className="text-sm font-semibold text-gray-600">Confirm Receipt</p>
                             <div>
                               <label className="block text-xs text-gray-500 mb-1">Bundles received *</label>
-                              <input type="number" value={receiptBundles}
+                              <input
+                                type="number"
+                                value={receiptBundles}
                                 onChange={e => setReceiptBundles(e.target.value)}
                                 placeholder={`Dispatched: ${s.bundles || '?'}`}
                                 className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
                             </div>
                             <div>
                               <label className="block text-xs text-gray-500 mb-1">Notes (optional)</label>
-                              <input type="text" value={receiptNotes}
+                              <input
+                                type="text"
+                                value={receiptNotes}
                                 onChange={e => setReceiptNotes(e.target.value)}
                                 placeholder="Any remarks..."
                                 className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
@@ -340,14 +438,17 @@ export default function GurudhamUpdatesPage() {
                                 className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
                                 Cancel
                               </button>
-                              <button onClick={() => confirmReceipt(s)} disabled={savingReceipt}
+                              <button
+                                onClick={() => confirmReceipt(s)}
+                                disabled={savingReceipt}
                                 className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
                                 {savingReceipt ? 'Saving...' : 'Confirm Receipt'}
                               </button>
                             </div>
                           </div>
                         ) : (
-                          <button onClick={() => setConfirmingId(s.id)}
+                          <button
+                            onClick={() => setConfirmingId(s.id)}
                             className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm">
                             ✅ Confirm I Received This
                           </button>
@@ -355,55 +456,17 @@ export default function GurudhamUpdatesPage() {
                       </div>
                     )}
 
-                    {/* Handover to Sishya */}
+                    {/* Handover to Sishya section */}
                     {isConfirmed && (
                       <div className="p-4 border-t border-gray-100">
                         {myHandover ? (
-                          <div>
-                            <div className={`rounded-xl p-3 ${myHandover.confirmedBySishya ? 'bg-green-50' : 'bg-blue-50'}`}>
-                              <p className={`text-sm font-semibold ${myHandover.confirmedBySishya ? 'text-green-700' : 'text-blue-700'}`}>
-                                {myHandover.confirmedBySishya ? '✅ Sishya confirmed receipt' : '⏳ Handed over — awaiting Sishya confirmation'}
-                              </p>
-                              <p className={`text-xs mt-1 ${myHandover.confirmedBySishya ? 'text-green-600' : 'text-blue-600'}`}>
-                                {myHandover.bundlesHandedOver} bundles → {myHandover.handedToName} Ji
-                              </p>
-                            </div>
-
-                            {/* Return from Sishya */}
-                            {myReturn && (
-                              <div className="mt-2">
-                                {myReturn.confirmedByAayojak ? (
-                                  <div className="bg-green-50 rounded-xl p-3">
-                                    <p className="text-green-700 text-sm font-semibold">✅ Return confirmed</p>
-                                    <p className="text-green-600 text-xs">{myReturn.bundlesReturned} bundles returned by {myHandover.handedToName} Ji</p>
-                                  </div>
-                                ) : (
-                                  <div className="bg-orange-50 rounded-xl p-3">
-                                    <p className="text-orange-700 text-sm font-semibold">📤 Sishya is returning bundles</p>
-                                    <p className="text-orange-600 text-xs mb-2">{myReturn.bundlesReturned} bundles from {myHandover.handedToName} Ji</p>
-                                    {confirmingReturn === myReturn.id ? (
-                                      <div className="flex gap-2">
-                                        <button onClick={() => setConfirmingReturn(null)}
-                                          className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-xs">
-                                          Cancel
-                                        </button>
-                                        <button
-                                          disabled={savingReturnConfirm}
-                                          onClick={() => confirmReturnFromSishya(myReturn, myHandover.id)}
-                                          className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-xs disabled:opacity-50">
-                                          {savingReturnConfirm ? 'Confirming...' : '✅ Confirm Receipt'}
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button onClick={() => setConfirmingReturn(myReturn.id)}
-                                        className="w-full bg-orange-500 text-white font-bold py-2 rounded-xl text-xs">
-                                        ✅ Confirm I Received {myReturn.bundlesReturned} Bundles Back
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                          <div className={`rounded-xl p-3 ${myHandover.confirmedBySishya ? 'bg-green-50' : 'bg-blue-50'}`}>
+                            <p className={`text-sm font-semibold ${myHandover.confirmedBySishya ? 'text-green-700' : 'text-blue-700'}`}>
+                              {myHandover.confirmedBySishya ? '✅ Sishya confirmed receipt' : '⏳ Handed over — awaiting Sishya confirmation'}
+                            </p>
+                            <p className={`text-xs mt-1 ${myHandover.confirmedBySishya ? 'text-green-600' : 'text-blue-600'}`}>
+                              {myHandover.bundlesHandedOver} bundles → {myHandover.handedToName} Ji
+                            </p>
                           </div>
                         ) : (
                           <>
@@ -412,7 +475,9 @@ export default function GurudhamUpdatesPage() {
                                 <p className="text-sm font-semibold text-gray-600">Hand over to Sishya</p>
                                 <div>
                                   <label className="block text-xs text-gray-500 mb-1">Select Sishya *</label>
-                                  <select value={handoverSishya} onChange={e => setHandoverSishya(e.target.value)}
+                                  <select
+                                    value={handoverSishya}
+                                    onChange={e => setHandoverSishya(e.target.value)}
                                     className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400">
                                     <option value="">Select Sishya...</option>
                                     {sishyaList.map(s => (
@@ -422,7 +487,9 @@ export default function GurudhamUpdatesPage() {
                                 </div>
                                 <div>
                                   <label className="block text-xs text-gray-500 mb-1">Bundles handed over *</label>
-                                  <input type="number" value={handoverBundles}
+                                  <input
+                                    type="number"
+                                    value={handoverBundles}
                                     onChange={e => setHandoverBundles(e.target.value)}
                                     placeholder={`Received: ${myReceipt?.bundlesReceived || '?'}`}
                                     className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
@@ -433,19 +500,133 @@ export default function GurudhamUpdatesPage() {
                                     className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
                                     Cancel
                                   </button>
-                                  <button onClick={() => saveHandover(s)} disabled={savingHandover}
+                                  <button
+                                    onClick={() => saveHandover(s)}
+                                    disabled={savingHandover}
                                     className="flex-1 bg-orange-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
                                     {savingHandover ? 'Saving...' : 'Record Handover'}
                                   </button>
                                 </div>
                               </div>
                             ) : (
-                              <button onClick={() => setShowHandover(s.id)}
+                              <button
+                                onClick={() => setShowHandover(s.id)}
                                 className="w-full border border-dashed border-orange-300 text-orange-500 font-semibold py-3 rounded-xl text-sm hover:bg-orange-50">
                                 🤝 Hand Over to Sishya
                               </button>
                             )}
                           </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Step 4 — Confirm return from Sishya */}
+                    {sishyaReturn && (
+                      <div className="p-4 border-t border-gray-100">
+                        {isReturnConfirmed ? (
+                          <div className="bg-green-50 rounded-xl p-3">
+                            <p className="text-green-700 text-sm font-semibold">✅ Return confirmed from Sishya</p>
+                            <p className="text-green-600 text-xs mt-1">
+                              {sishyaReturn.bundlesReturned} bundles returned and confirmed
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="bg-amber-50 rounded-xl p-3 space-y-3">
+                            <p className="text-amber-700 text-sm font-semibold">📦 Sishya has returned bundles</p>
+                            <p className="text-amber-600 text-xs">
+                              {sishyaReturn.bundlesReturned} bundles returned — please confirm you received them
+                            </p>
+                            <button
+                              onClick={() => confirmReturnFromSishya(s, sishyaReturn)}
+                              disabled={savingReturnConfirm}
+                              className="w-full bg-green-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
+                              {savingReturnConfirm ? 'Saving...' : '✅ Confirm Return Received'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Step 5 — Send back to Gurudham */}
+                    {isReturnConfirmed && (
+                      <div className="p-4 border-t border-gray-100">
+                        {rtgRecord ? (
+                          <div className={`rounded-xl p-3 ${rtgRecord.dispatchConfirmed ? 'bg-green-50' : 'bg-blue-50'}`}>
+                            <p className={`text-sm font-semibold ${rtgRecord.dispatchConfirmed ? 'text-green-700' : 'text-blue-700'}`}>
+                              {rtgRecord.dispatchConfirmed ? '✅ Dispatch confirmed receipt' : '⏳ Sent — awaiting Dispatch confirmation'}
+                            </p>
+                            <p className={`text-xs mt-1 ${rtgRecord.dispatchConfirmed ? 'text-green-600' : 'text-blue-600'}`}>
+                              {rtgRecord.totalBundlesSent} bundles sent to Gurudham
+                              {rtgRecord.extraGiftBundles > 0 && ` (incl. ${rtgRecord.extraGiftBundles} gift bundles)`}
+                            </p>
+                            {rtgRecord.biltyImageUrl ? (
+                              <a href={rtgRecord.biltyImageUrl} target="_blank" rel="noreferrer"
+                                className="text-xs text-blue-500 underline mt-1 block">
+                                View Bilty
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <p className="text-sm font-semibold text-gray-700">📦 Send back to Gurudham</p>
+                            <div className="bg-gray-50 rounded-xl p-3">
+                              <p className="text-xs text-gray-500">Bundles returned by Sishya</p>
+                              <p className="text-lg font-bold text-gray-700">{sishyaReturn?.bundlesReturned || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-2">Extra gift bundles (optional)</p>
+                              <div className="flex items-center gap-3">
+                                <button
+                                  onClick={() => setExtraBundles(prev => ({ ...prev, [s.id]: Math.max(0, (prev[s.id] || 0) - 1) }))}
+                                  className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 text-xl font-bold flex items-center justify-center">
+                                  -
+                                </button>
+                                <span className="text-xl font-bold text-gray-700 w-8 text-center">{extra}</span>
+                                <button
+                                  onClick={() => setExtraBundles(prev => ({ ...prev, [s.id]: (prev[s.id] || 0) + 1 }))}
+                                  className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 text-xl font-bold flex items-center justify-center">
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                            <div className="bg-orange-50 rounded-xl p-3 flex items-center justify-between">
+                              <p className="text-sm font-semibold text-orange-700">Total sending to Gurudham</p>
+                              <p className="text-xl font-bold text-orange-600">{total}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-2">Upload bilty image (optional)</p>
+                              {biltyPreview[s.id] ? (
+                                <div className="relative">
+                                  <img src={biltyPreview[s.id]} alt="Bilty"
+                                    className="w-full h-32 object-cover rounded-xl border border-orange-200" />
+                                  <button
+                                    onClick={() => { setBiltyImage(prev => ({ ...prev, [s.id]: null })); setBiltyPreview(prev => ({ ...prev, [s.id]: '' })); }}
+                                    className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                                    Remove
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="w-full border-2 border-dashed border-orange-200 rounded-xl p-4 flex flex-col items-center cursor-pointer hover:bg-orange-50">
+                                  <span className="text-2xl">📎</span>
+                                  <span className="text-xs text-gray-400 mt-1">Tap to upload bilty</span>
+                                  <input type="file" accept="image/*" className="hidden"
+                                    onChange={e => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        setBiltyImage(prev => ({ ...prev, [s.id]: file }));
+                                        setBiltyPreview(prev => ({ ...prev, [s.id]: URL.createObjectURL(file) }));
+                                      }
+                                    }} />
+                                </label>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => sendToGurudham(s, sishyaReturn)}
+                              disabled={savingReturn5}
+                              className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm disabled:opacity-50">
+                              {savingReturn5 ? 'Sending...' : '🚚 Send to Gurudham'}
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}

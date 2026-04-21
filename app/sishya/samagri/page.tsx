@@ -3,26 +3,23 @@
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getShivirSamagri } from '@/lib/samagri';
 
 export default function SishyaSamagriPage() {
   const [shivir, setShivir] = useState<any>(null);
   const [shivirId, setShivirId] = useState('');
-  const [userPhone, setUserPhone] = useState('');
+  const [sishyaPhone, setSishyaPhone] = useState('');
   const [samagriItems, setSamagriItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterBundle, setFilterBundle] = useState<number | 'all'>('all');
 
-  // Handover from Aayojak
-  const [pendingHandovers, setPendingHandovers] = useState<any[]>([]);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [savingConfirm, setSavingConfirm] = useState(false);
-
-  // Return to Aayojak
-  const [confirmedHandovers, setConfirmedHandovers] = useState<any[]>([]);
-  const [returningId, setReturningId] = useState<string | null>(null);
+  // Step 3 state
+  const [handover, setHandover] = useState<any>(null);
+  const [alreadyReturned, setAlreadyReturned] = useState(false);
+  const [returnRecord, setReturnRecord] = useState<any>(null);
+  const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnBundles, setReturnBundles] = useState('');
   const [savingReturn, setSavingReturn] = useState(false);
 
@@ -30,7 +27,7 @@ export default function SishyaSamagriPage() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) { window.location.href = '/login'; return; }
       const phone = currentUser.phoneNumber!;
-      setUserPhone(phone);
+      setSishyaPhone(phone);
 
       const userQ = query(collection(db, 'users'), where('phone', '==', phone));
       const userSnap = await getDocs(userQ);
@@ -38,106 +35,89 @@ export default function SishyaSamagriPage() {
         window.location.href = '/access-denied'; return;
       }
 
-      // Get Shivir using localStorage
       const savedShivirId = localStorage.getItem('sishyaSelectedShivirId');
-      const sishyaSnap = await getDocs(collection(db, 'shivirSishya'));
-      const myShivirIds = sishyaSnap.docs
-        .filter(d => d.data().phone === phone)
-        .map(d => d.data().shivirId);
+      const sishyaQ = query(collection(db, 'shivirSishya'), where('phone', '==', phone));
+      const sishyaSnap = await getDocs(sishyaQ);
 
-      if (myShivirIds.length === 0) { setLoading(false); return; }
+      if (!sishyaSnap.empty) {
+        const myShivirIds = sishyaSnap.docs.map(d => d.data().shivirId);
+        const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
+          ? savedShivirId
+          : myShivirIds[0];
 
-      const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
-        ? savedShivirId : myShivirIds[0];
+        setShivirId(sid);
 
-      setShivirId(sid);
+        const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));
+        if (!shivirSnap.empty) {
+          setShivir({ id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() });
 
-      const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));
-      if (!shivirSnap.empty) {
-        setShivir({ id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() });
-        const items = await getShivirSamagri(sid) as any[];
-        setSamagriItems(items.filter(i => i.quantityToSend > 0));
+          const items = await getShivirSamagri(sid) as any[];
+          setSamagriItems(items.filter(i => i.quantityToSend > 0));
+
+          // Fetch handover for this Sishya
+          const handoverSnap = await getDocs(collection(db, 'samagriHandovers'));
+          const myHandover = handoverSnap.docs
+            .find(d => d.data().shivirId === sid && d.data().handedTo === phone);
+
+          if (myHandover) {
+            setHandover({ id: myHandover.id, ...myHandover.data() });
+
+            // Check if already returned
+            const returnSnap = await getDocs(collection(db, 'samagriReturns'));
+            const myReturn = returnSnap.docs
+              .find(d => d.data().shivirId === sid && d.data().returnedBy === phone);
+
+            if (myReturn) {
+              setAlreadyReturned(true);
+              setReturnRecord({ id: myReturn.id, ...myReturn.data() });
+            }
+          }
+        }
       }
-
-      // Load handovers for this Sishya
-      const handoverSnap = await getDocs(collection(db, 'samagriHandovers'));
-      const myHandovers = handoverSnap.docs
-        .filter(d => d.data().handedTo === phone && d.data().shivirId === sid)
-        .map(d => ({ id: d.id, ...d.data() }));
-
-      setPendingHandovers(myHandovers.filter((h: any) => !h.confirmedBySishya && !h.returnedBySishya));
-      setConfirmedHandovers(myHandovers.filter((h: any) => h.confirmedBySishya && !h.returnedBySishya));
-
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const confirmReceipt = async (handover: any) => {
-    setSavingConfirm(true);
-    try {
-      await updateDoc(doc(db, 'samagriHandovers', handover.id), {
-        confirmedBySishya: true,
-        confirmedBySishyaAt: serverTimestamp(),
-      });
-
-      // Notify Aayojak
-      const { createNotificationForMany } = await import('@/lib/notifications');
-      await createNotificationForMany({
-        phones: [handover.handedBy],
-        title: '✅ Samagri Receipt Confirmed by Sishya',
-        body: `Sishya has confirmed receipt of ${handover.bundlesHandedOver} bundles of Samagri.`,
-        type: 'samagri_sishya_confirmed',
-        shivirId,
-      });
-
-      setPendingHandovers(prev => prev.filter(h => h.id !== handover.id));
-      setConfirmedHandovers(prev => [...prev, { ...handover, confirmedBySishya: true }]);
-      setConfirmingId(null);
-    } catch (e) {
-      alert('Could not confirm. Please try again.');
+  const saveReturn = async () => {
+    if (!returnBundles || Number(returnBundles) <= 0) {
+      alert('Please enter number of bundles you are returning.');
+      return;
     }
-    setSavingConfirm(false);
-  };
-
-  const submitReturn = async (handover: any) => {
-    if (!returnBundles || Number(returnBundles) < 0) {
-      alert('Please enter number of bundles being returned.');
+    if (Number(returnBundles) > handover.bundlesHandedOver) {
+      alert(`You cannot return more than ${handover.bundlesHandedOver} bundles (what was handed to you).`);
       return;
     }
     setSavingReturn(true);
     try {
-      await updateDoc(doc(db, 'samagriHandovers', handover.id), {
-        returnedBySishya: true,
-        bundlesReturned: Number(returnBundles),
-        returnedBySishyaAt: serverTimestamp(),
-      });
+      const returnId = `${handover.logisticsId}_return_${sishyaPhone}`;
 
-      // Create return record
-      const returnId = `${handover.id}_return`;
       await setDoc(doc(db, 'samagriReturns', returnId), {
-        handoverId: handover.id,
+        logisticsId: handover.logisticsId,
         shivirId,
-        returnedBy: userPhone,
+        returnedBy: sishyaPhone,
         returnedTo: handover.handedBy,
         bundlesReturned: Number(returnBundles),
-        bundlesOriginal: handover.bundlesHandedOver,
-        confirmedByAayojak: false,
-        createdAt: serverTimestamp(),
+        bundlesReceived: handover.bundlesHandedOver,
+        confirmedAt: serverTimestamp(),
       });
 
       // Notify Aayojak
       const { createNotificationForMany } = await import('@/lib/notifications');
       await createNotificationForMany({
         phones: [handover.handedBy],
-        title: '📦 Samagri Return from Sishya',
-        body: `Sishya is returning ${returnBundles} bundles of Samagri. Please confirm receipt.`,
-        type: 'samagri_sishya_return',
+        title: '📦 Sishya Returned Samagri',
+        body: `Sishya has returned ${returnBundles} bundles. Please confirm on Gurudham page.`,
+        type: 'samagri_return_from_sishya',
         shivirId,
       });
 
-      setConfirmedHandovers(prev => prev.filter(h => h.id !== handover.id));
-      setReturningId(null);
+      setAlreadyReturned(true);
+      setReturnRecord({
+        bundlesReturned: Number(returnBundles),
+        bundlesReceived: handover.bundlesHandedOver,
+      });
+      setShowReturnForm(false);
       setReturnBundles('');
     } catch (e) {
       alert('Could not save. Please try again.');
@@ -146,7 +126,6 @@ export default function SishyaSamagriPage() {
   };
 
   const bundles = [...new Set(samagriItems.map(i => i.bundleNumber || 1))].sort();
-
   const filteredItems = samagriItems.filter(item => {
     const matchSearch = search === '' ||
       item.itemName.toLowerCase().includes(search.toLowerCase()) ||
@@ -154,7 +133,6 @@ export default function SishyaSamagriPage() {
     const matchBundle = filterBundle === 'all' || item.bundleNumber === filterBundle;
     return matchSearch && matchBundle;
   });
-
   const filteredCategories = [...new Set(filteredItems.map(i => i.category))];
 
   if (loading) return (
@@ -180,63 +158,40 @@ export default function SishyaSamagriPage() {
           </div>
         </div>
 
-        {/* STEP 1 — Confirm receipt from Aayojak */}
-        {pendingHandovers.length > 0 && (
-          <div className="mb-4">
-            {pendingHandovers.map(handover => (
-              <div key={handover.id} className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-3">
-                <p className="text-blue-700 font-bold text-sm mb-1">📦 Samagri Handover</p>
-                <p className="text-blue-600 text-sm mb-3">
-                  Aayojak has handed over <span className="font-bold">{handover.bundlesHandedOver} bundles</span> to you. Please confirm receipt.
-                </p>
+        {/* ── STEP 3 — Handover Card ── */}
+        {handover && (
+          <div className="bg-white rounded-2xl shadow mb-4 overflow-hidden">
 
-                {confirmingId === handover.id ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-blue-600">Tap confirm to acknowledge you received the bundles.</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setConfirmingId(null)}
-                        className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => confirmReceipt(handover)}
-                        disabled={savingConfirm}
-                        className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
-                        {savingConfirm ? 'Confirming...' : '✅ Confirm Receipt'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmingId(handover.id)}
-                    className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl text-sm">
-                    ✅ Confirm I Received {handover.bundlesHandedOver} Bundles
-                  </button>
-                )}
+            <div className="bg-orange-50 px-5 py-4 border-b border-orange-100">
+              <h2 className="font-bold text-orange-600 text-sm">📦 Samagri Handed to You</h2>
+              <p className="text-gray-500 text-xs mt-0.5">
+                Aayojak handed over {handover.bundlesHandedOver} bundles
+              </p>
+            </div>
+
+            {alreadyReturned ? (
+              /* Already returned — show summary */
+              <div className="bg-green-50 px-5 py-4">
+                <p className="text-green-700 font-semibold text-sm">✅ You have confirmed return</p>
+                <p className="text-green-600 text-xs mt-1">
+                  Received: {returnRecord.bundlesReceived} bundles · Returned: {returnRecord.bundlesReturned} bundles
+                </p>
+                <p className="text-green-500 text-xs mt-0.5">
+                  Aayojak will confirm receipt on their end
+                </p>
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* STEP 2 — Return remaining bundles to Aayojak */}
-        {confirmedHandovers.length > 0 && (
-          <div className="mb-4">
-            {confirmedHandovers.map(handover => (
-              <div key={handover.id} className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-3">
-                <p className="text-orange-700 font-bold text-sm mb-1">🔄 Return Remaining Samagri</p>
-                <p className="text-orange-600 text-sm mb-1">
-                  You received <span className="font-bold">{handover.bundlesHandedOver} bundles</span>.
-                </p>
-                <p className="text-orange-500 text-xs mb-3">
-                  After the Shivir, return remaining bundles to Aayojak.
-                </p>
-
-                {returningId === handover.id ? (
+            ) : (
+              /* Not yet returned */
+              <div className="px-5 py-4">
+                {showReturnForm ? (
                   <div className="space-y-3">
+                    <div className="bg-orange-50 rounded-xl p-3">
+                      <p className="text-xs text-gray-500">Bundles handed to you</p>
+                      <p className="text-lg font-bold text-orange-600">{handover.bundlesHandedOver}</p>
+                    </div>
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1 font-semibold">
-                        Bundles being returned *
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Bundles you are returning *
                       </label>
                       <input
                         type="number"
@@ -245,32 +200,32 @@ export default function SishyaSamagriPage() {
                         placeholder={`Max: ${handover.bundlesHandedOver}`}
                         className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
                       <p className="text-xs text-gray-400 mt-1">
-                        Enter 0 if all bundles were used during the Shivir.
+                        Cannot exceed {handover.bundlesHandedOver} bundles
                       </p>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => { setReturningId(null); setReturnBundles(''); }}
+                        onClick={() => { setShowReturnForm(false); setReturnBundles(''); }}
                         className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
                         Cancel
                       </button>
                       <button
-                        onClick={() => submitReturn(handover)}
+                        onClick={saveReturn}
                         disabled={savingReturn}
-                        className="flex-1 bg-orange-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
-                        {savingReturn ? 'Submitting...' : 'Submit Return'}
+                        className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
+                        {savingReturn ? 'Saving...' : 'Confirm Return'}
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button
-                    onClick={() => setReturningId(handover.id)}
-                    className="w-full border border-dashed border-orange-300 text-orange-500 font-semibold py-3 rounded-xl text-sm hover:bg-orange-100">
-                    📤 Return Remaining Bundles to Aayojak
+                    onClick={() => setShowReturnForm(true)}
+                    className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm">
+                    ✅ Confirm Receipt & Return Bundles
                   </button>
                 )}
               </div>
-            ))}
+            )}
           </div>
         )}
 
