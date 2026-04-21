@@ -15,9 +15,18 @@ export default function SishyaSamagriPage() {
   const [search, setSearch] = useState('');
   const [filterBundle, setFilterBundle] = useState<number | 'all'>('all');
 
-  // Step 3 state
+  // Handover card state
   const [handover, setHandover] = useState<any>(null);
-  const [alreadyReturned, setAlreadyReturned] = useState(false);
+
+  // Step A — confirm receipt
+  const [receiptConfirmed, setReceiptConfirmed] = useState(false);
+  const [receiptRecord, setReceiptRecord] = useState<any>(null);
+  const [showReceiptForm, setShowReceiptForm] = useState(false);
+  const [actualReceived, setActualReceived] = useState('');
+  const [savingReceipt, setSavingReceipt] = useState(false);
+
+  // Step B — confirm return
+  const [returnConfirmed, setReturnConfirmed] = useState(false);
   const [returnRecord, setReturnRecord] = useState<any>(null);
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnBundles, setReturnBundles] = useState('');
@@ -42,15 +51,13 @@ export default function SishyaSamagriPage() {
       if (!sishyaSnap.empty) {
         const myShivirIds = sishyaSnap.docs.map(d => d.data().shivirId);
         const sid = (savedShivirId && myShivirIds.includes(savedShivirId))
-          ? savedShivirId
-          : myShivirIds[0];
+          ? savedShivirId : myShivirIds[0];
 
         setShivirId(sid);
 
         const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', sid)));
         if (!shivirSnap.empty) {
           setShivir({ id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() });
-
           const items = await getShivirSamagri(sid) as any[];
           setSamagriItems(items.filter(i => i.quantityToSend > 0));
 
@@ -62,13 +69,21 @@ export default function SishyaSamagriPage() {
           if (myHandover) {
             setHandover({ id: myHandover.id, ...myHandover.data() });
 
-            // Check if already returned
+            // Check Step A — receipt confirmed
+            const receiptSnap = await getDocs(collection(db, 'samagriSishyaReceipts'));
+            const myReceipt = receiptSnap.docs
+              .find(d => d.data().shivirId === sid && d.data().confirmedBy === phone);
+            if (myReceipt) {
+              setReceiptConfirmed(true);
+              setReceiptRecord({ id: myReceipt.id, ...myReceipt.data() });
+            }
+
+            // Check Step B — return confirmed
             const returnSnap = await getDocs(collection(db, 'samagriReturns'));
             const myReturn = returnSnap.docs
               .find(d => d.data().shivirId === sid && d.data().returnedBy === phone);
-
             if (myReturn) {
-              setAlreadyReturned(true);
+              setReturnConfirmed(true);
               setReturnRecord({ id: myReturn.id, ...myReturn.data() });
             }
           }
@@ -79,30 +94,87 @@ export default function SishyaSamagriPage() {
     return () => unsubscribe();
   }, []);
 
+  // Step A — Sishya confirms how many bundles they actually received
+  const saveReceipt = async () => {
+    if (!actualReceived || Number(actualReceived) <= 0) {
+      alert('Please enter how many bundles you received.');
+      return;
+    }
+    if (Number(actualReceived) > handover.bundlesHandedOver) {
+      alert(`Cannot be more than ${handover.bundlesHandedOver} bundles handed over.`);
+      return;
+    }
+    setSavingReceipt(true);
+    try {
+      const receiptId = `${handover.logisticsId}_sishyareceipt_${sishyaPhone}`;
+      await setDoc(doc(db, 'samagriSishyaReceipts', receiptId), {
+        logisticsId: handover.logisticsId,
+        shivirId,
+        confirmedBy: sishyaPhone,
+        bundlesHandedOver: handover.bundlesHandedOver,
+        bundlesActuallyReceived: Number(actualReceived),
+        aayojakPhone: handover.handedBy,
+        confirmedAt: serverTimestamp(),
+      });
+
+      // Notify Aayojak if count differs
+      if (Number(actualReceived) !== handover.bundlesHandedOver) {
+        const { createNotificationForMany } = await import('@/lib/notifications');
+        await createNotificationForMany({
+          phones: [handover.handedBy],
+          title: '⚠️ Bundle Count Mismatch',
+          body: `Sishya received ${actualReceived} bundles but you recorded ${handover.bundlesHandedOver}. Please check.`,
+          type: 'samagri_receipt_mismatch',
+          shivirId,
+        });
+      } else {
+        const { createNotificationForMany } = await import('@/lib/notifications');
+        await createNotificationForMany({
+          phones: [handover.handedBy],
+          title: '✅ Sishya Confirmed Receipt',
+          body: `Sishya confirmed receiving ${actualReceived} bundles of Samagri.`,
+          type: 'samagri_sishya_receipt_confirmed',
+          shivirId,
+        });
+      }
+
+      setReceiptConfirmed(true);
+      setReceiptRecord({
+        bundlesActuallyReceived: Number(actualReceived),
+        bundlesHandedOver: handover.bundlesHandedOver,
+      });
+      setShowReceiptForm(false);
+      setActualReceived('');
+    } catch (e) {
+      alert('Could not save. Please try again.');
+    }
+    setSavingReceipt(false);
+  };
+
+  // Step B — Sishya confirms how many bundles they are returning
   const saveReturn = async () => {
     if (!returnBundles || Number(returnBundles) <= 0) {
       alert('Please enter number of bundles you are returning.');
       return;
     }
-    if (Number(returnBundles) > handover.bundlesHandedOver) {
-      alert(`You cannot return more than ${handover.bundlesHandedOver} bundles (what was handed to you).`);
+    const maxReturn = receiptRecord?.bundlesActuallyReceived || handover?.bundlesHandedOver || 0;
+    if (Number(returnBundles) > maxReturn) {
+      alert(`Cannot return more than ${maxReturn} bundles.`);
       return;
     }
     setSavingReturn(true);
     try {
       const returnId = `${handover.logisticsId}_return_${sishyaPhone}`;
-
       await setDoc(doc(db, 'samagriReturns', returnId), {
         logisticsId: handover.logisticsId,
         shivirId,
         returnedBy: sishyaPhone,
         returnedTo: handover.handedBy,
         bundlesReturned: Number(returnBundles),
-        bundlesReceived: handover.bundlesHandedOver,
+        bundlesReceived: receiptRecord?.bundlesActuallyReceived || handover.bundlesHandedOver,
         confirmedAt: serverTimestamp(),
       });
 
-      // Notify Aayojak
       const { createNotificationForMany } = await import('@/lib/notifications');
       await createNotificationForMany({
         phones: [handover.handedBy],
@@ -112,11 +184,8 @@ export default function SishyaSamagriPage() {
         shivirId,
       });
 
-      setAlreadyReturned(true);
-      setReturnRecord({
-        bundlesReturned: Number(returnBundles),
-        bundlesReceived: handover.bundlesHandedOver,
-      });
+      setReturnConfirmed(true);
+      setReturnRecord({ bundlesReturned: Number(returnBundles) });
       setShowReturnForm(false);
       setReturnBundles('');
     } catch (e) {
@@ -158,10 +227,9 @@ export default function SishyaSamagriPage() {
           </div>
         </div>
 
-        {/* ── STEP 3 — Handover Card ── */}
+        {/* ── Handover Card ── */}
         {handover && (
           <div className="bg-white rounded-2xl shadow mb-4 overflow-hidden">
-
             <div className="bg-orange-50 px-5 py-4 border-b border-orange-100">
               <h2 className="font-bold text-orange-600 text-sm">📦 Samagri Handed to You</h2>
               <p className="text-gray-500 text-xs mt-0.5">
@@ -169,61 +237,117 @@ export default function SishyaSamagriPage() {
               </p>
             </div>
 
-            {alreadyReturned ? (
-              /* Already returned — show summary */
-              <div className="bg-green-50 px-5 py-4">
-                <p className="text-green-700 font-semibold text-sm">✅ You have confirmed return</p>
-                <p className="text-green-600 text-xs mt-1">
-                  Received: {returnRecord.bundlesReceived} bundles · Returned: {returnRecord.bundlesReturned} bundles
-                </p>
-                <p className="text-green-500 text-xs mt-0.5">
-                  Aayojak will confirm receipt on their end
-                </p>
-              </div>
-            ) : (
-              /* Not yet returned */
+            {/* Step A — Confirm Receipt */}
+            {!receiptConfirmed ? (
               <div className="px-5 py-4">
-                {showReturnForm ? (
+                {showReceiptForm ? (
                   <div className="space-y-3">
                     <div className="bg-orange-50 rounded-xl p-3">
-                      <p className="text-xs text-gray-500">Bundles handed to you</p>
+                      <p className="text-xs text-gray-500">Bundles handed to you by Aayojak</p>
                       <p className="text-lg font-bold text-orange-600">{handover.bundlesHandedOver}</p>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">
-                        Bundles you are returning *
+                        How many bundles did you actually receive? *
                       </label>
                       <input
                         type="number"
-                        value={returnBundles}
-                        onChange={e => setReturnBundles(e.target.value)}
+                        value={actualReceived}
+                        onChange={e => setActualReceived(e.target.value)}
                         placeholder={`Max: ${handover.bundlesHandedOver}`}
                         className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
                       <p className="text-xs text-gray-400 mt-1">
-                        Cannot exceed {handover.bundlesHandedOver} bundles
+                        Enter actual count — if less, Aayojak will be notified
                       </p>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => { setShowReturnForm(false); setReturnBundles(''); }}
+                        onClick={() => { setShowReceiptForm(false); setActualReceived(''); }}
                         className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
                         Cancel
                       </button>
                       <button
-                        onClick={saveReturn}
-                        disabled={savingReturn}
+                        onClick={saveReceipt}
+                        disabled={savingReceipt}
                         className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
-                        {savingReturn ? 'Saving...' : 'Confirm Return'}
+                        {savingReceipt ? 'Saving...' : 'Confirm Receipt'}
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button
-                    onClick={() => setShowReturnForm(true)}
+                    onClick={() => setShowReceiptForm(true)}
                     className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm">
-                    ✅ Confirm Receipt & Return Bundles
+                    ✅ Confirm I Received the Bundles
                   </button>
                 )}
+              </div>
+            ) : (
+              /* Receipt confirmed — show summary + Step B */
+              <div>
+                <div className="bg-green-50 px-5 py-3 border-b border-green-100">
+                  <p className="text-green-700 font-semibold text-sm">✅ Receipt confirmed</p>
+                  <p className="text-green-600 text-xs mt-0.5">
+                    You received {receiptRecord.bundlesActuallyReceived} of {handover.bundlesHandedOver} bundles
+                    {receiptRecord.bundlesActuallyReceived < handover.bundlesHandedOver &&
+                      <span className="text-amber-600"> · Aayojak notified of difference</span>}
+                  </p>
+                </div>
+
+                {/* Step B — Return bundles */}
+                <div className="px-5 py-4">
+                  {returnConfirmed ? (
+                    <div className="bg-green-50 rounded-xl p-3">
+                      <p className="text-green-700 text-sm font-semibold">✅ Return confirmed</p>
+                      <p className="text-green-600 text-xs mt-1">
+                        You returned {returnRecord.bundlesReturned} bundles to Aayojak
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {showReturnForm ? (
+                        <div className="space-y-3">
+                          <div className="bg-orange-50 rounded-xl p-3">
+                            <p className="text-xs text-gray-500">Bundles to return (max)</p>
+                            <p className="text-lg font-bold text-orange-600">
+                              {receiptRecord?.bundlesActuallyReceived}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">
+                              Bundles you are returning *
+                            </label>
+                            <input
+                              type="number"
+                              value={returnBundles}
+                              onChange={e => setReturnBundles(e.target.value)}
+                              placeholder={`Max: ${receiptRecord?.bundlesActuallyReceived}`}
+                              className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => { setShowReturnForm(false); setReturnBundles(''); }}
+                              className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
+                              Cancel
+                            </button>
+                            <button
+                              onClick={saveReturn}
+                              disabled={savingReturn}
+                              className="flex-1 bg-orange-500 text-white font-bold py-2 rounded-xl text-sm disabled:opacity-50">
+                              {savingReturn ? 'Saving...' : 'Confirm Return'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowReturnForm(true)}
+                          className="w-full border border-dashed border-orange-300 text-orange-500 font-semibold py-3 rounded-xl text-sm">
+                          📦 Return Bundles to Aayojak
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

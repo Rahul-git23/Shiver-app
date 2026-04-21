@@ -90,9 +90,16 @@ export default function GurudhamUpdatesPage() {
           setSishyaList(sishyaDetails);
 
           // Get Samagri dispatches for this Shivir
-          const samagriQ = query(collection(db, 'logistics'), where('shivirId', '==', sid));
+          const samagriQ = query(collection(db, 'samagriDispatch'), where('shivirId', '==', sid));
           const samagriSnap = await getDocs(samagriQ);
-          setSamagriList(samagriSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setSamagriList(samagriSnap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(), 
+            status: 'dispatched',
+            title: `Samagri Dispatch — ${d.data().bundles} Bundles`,
+            bundles: d.data().bundles,
+            transport: d.data().transportMode,
+          })));
 
           // Get existing receipts confirmed by this Aayojak
           const receiptSnap = await getDocs(collection(db, 'samagriReceipts'));

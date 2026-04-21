@@ -155,6 +155,12 @@ export default function NotificationsPage() {
                     window.location.href = '/sishya/stay/self-book';
                   } else if (notif.type === 'stay_remark') {
                     window.location.href = '/organiser/stay';
+                  } else if (notif.type === 'samagri_handover_to_sishya' || notif.type === 'samagri_sishya_receipt_confirmed' || notif.type === 'samagri_receipt_mismatch') {
+                    window.location.href = '/sishya/samagri';
+                  } else if (notif.type === 'samagri_return_from_sishya' || notif.type === 'samagri_return_confirmed' || notif.type === 'samagri_receipt_confirmed') {
+                    window.location.href = '/organiser/gurudham';
+                  } else if (notif.type === 'samagri_return_to_gurudham' || notif.type === 'samagri_gurudham_confirmed') {
+                    window.location.href = userRole === 'dispatch' ? '/dispatch' : '/organiser/gurudham';
                   }
                 }}
                 className={`w-full text-left rounded-2xl shadow p-4 flex items-start gap-3 transition-all ${
