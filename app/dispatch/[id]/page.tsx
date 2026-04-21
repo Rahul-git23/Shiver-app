@@ -46,6 +46,10 @@ export default function DispatchShivirPage() {
   // Organiser requests
   const [requests, setRequests] = useState<any[]>([]);
 
+  // Returns from Aayojak
+  const [returnRecords, setReturnRecords] = useState<any[]>([]);
+  const [confirmingReturn, setConfirmingReturn] = useState<string | null>(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) { window.location.href = '/login'; return; }
@@ -80,6 +84,17 @@ export default function DispatchShivirPage() {
       const reqQ = query(collection(db, 'organiserSamagriRequests'), where('shivirId', '==', shivirId), where('status', '==', 'approved'));
       const reqSnap = await getDocs(reqQ);
       setRequests(reqSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      
+      // Load samagri return to gurudham records
+      const rtgSnap = await getDocs(query(collection(db, 'samagriReturnToGurudham'), where('shivirId', '==', shivirId)));
+      const rtgRecords = rtgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Enrich with Aayojak name
+      const enriched = await Promise.all(rtgRecords.map(async (r: any) => {
+        const uSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', r.sentBy)));
+        const name = !uSnap.empty ? uSnap.docs[0].data().name : r.sentBy;
+        return { ...r, sentByName: name };
+      }));
+      setReturnRecords(enriched);
 
       setLoading(false);
     });
@@ -192,6 +207,10 @@ export default function DispatchShivirPage() {
           <button onClick={() => setActiveTab('requests')}
             className={`flex-1 py-2 rounded-xl font-bold text-sm ${activeTab === 'requests' ? 'bg-orange-500 text-white' : 'bg-white text-gray-500 shadow'}`}>
             📋 Requests {requests.length > 0 && `(${requests.length})`}
+          </button>
+          <button onClick={() => setActiveTab('returns' as any)}
+            className={`flex-1 py-2 rounded-xl font-bold text-sm ${activeTab === ('returns' as any) ? 'bg-orange-500 text-white' : 'bg-white text-gray-500 shadow'}`}>
+            🔄 Returns {returnRecords.length > 0 && `(${returnRecords.length})`}
           </button>
         </div>
 
@@ -484,6 +503,105 @@ export default function DispatchShivirPage() {
                       {req.remarks && <p className="text-gray-400 text-xs mt-1">📝 {req.remarks}</p>}
                       {req.paymentRequired && (
                         <p className="text-orange-600 text-xs mt-1 font-medium">💰 Payment: ₹{req.amount}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* RETURNS TAB */}
+        {activeTab === ('returns' as any) && (
+          <div>
+            <div className="bg-white rounded-2xl shadow p-4">
+              <h2 className="font-bold text-gray-700 mb-3">
+                Returns from Aayojak ({returnRecords.length})
+              </h2>
+              {returnRecords.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="text-3xl mb-2">🔄</div>
+                  <p className="text-gray-400 text-sm">No returns yet</p>
+                  <p className="text-gray-400 text-xs mt-1">When Aayojak sends samagri back it will appear here</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {returnRecords.map((r: any) => (
+                    <div key={r.id} className="border border-orange-100 rounded-xl overflow-hidden">
+                      <div className="bg-orange-50 p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="font-bold text-gray-700">📦 {r.totalBundlesSent} Bundles</p>
+                          <span className={`text-xs px-2 py-1 rounded-full ${r.dispatchConfirmed ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
+                            {r.dispatchConfirmed ? '✅ Confirmed' : '⏳ Pending'}
+                          </span>
+                        </div>
+                        <p className="text-gray-500 text-xs">From: {r.sentByName} Ji</p>
+                        {r.extraGiftBundles > 0 && (
+                          <p className="text-gray-500 text-xs">
+                            Includes {r.extraGiftBundles} extra gift bundle{r.extraGiftBundles > 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
+                      {r.biltyImageUrl ? (
+                        <div className="px-3 py-2 border-t border-orange-100">
+                          <a href={r.biltyImageUrl} target="_blank" rel="noreferrer"
+                            className="text-xs text-blue-500 underline">
+                            📎 View Bilty Image
+                          </a>
+                        </div>
+                      ) : null}
+                      {!r.dispatchConfirmed && (
+                        <div className="p-3 border-t border-orange-100">
+                          {confirmingReturn === r.id ? (
+                            <div className="space-y-2">
+                              <p className="text-xs text-gray-500">Confirm you received {r.totalBundlesSent} bundles from {r.sentByName} Ji?</p>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setConfirmingReturn(null)}
+                                  className="flex-1 border border-gray-200 text-gray-500 font-semibold py-2 rounded-xl text-sm">
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await updateDoc(doc(db, 'samagriReturnToGurudham', r.id), {
+                                        dispatchConfirmed: true,
+                                      });
+                                      setReturnRecords(prev => prev.map(rec =>
+                                        rec.id === r.id ? { ...rec, dispatchConfirmed: true } : rec
+                                      ));
+                                      const { createNotificationForMany } = await import('@/lib/notifications');
+                                      await createNotificationForMany({
+                                        phones: [r.sentBy],
+                                        title: '✅ Gurudham Received Samagri',
+                                        body: `Dispatch team confirmed receipt of ${r.totalBundlesSent} bundles returned to Gurudham.`,
+                                        type: 'samagri_gurudham_confirmed',
+                                        shivirId,
+                                      });
+                                      setConfirmingReturn(null);
+                                    } catch (e) {
+                                      alert('Could not save. Please try again.');
+                                    }
+                                  }}
+                                  className="flex-1 bg-green-500 text-white font-bold py-2 rounded-xl text-sm">
+                                  Yes, Confirm
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmingReturn(r.id)}
+                              className="w-full bg-green-500 text-white font-bold py-2 rounded-xl text-sm">
+                              ✅ Confirm Receipt
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {r.dispatchConfirmed && (
+                        <div className="bg-green-50 px-3 py-2 border-t border-green-100">
+                          <p className="text-green-700 text-xs font-semibold">✅ Receipt confirmed by Dispatch team</p>
+                        </div>
                       )}
                     </div>
                   ))}
