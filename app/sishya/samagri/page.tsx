@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { getShivirSamagri } from '@/lib/samagri';
 
 export default function SishyaSamagriPage() {
@@ -137,6 +137,11 @@ export default function SishyaSamagriPage() {
           shivirId,
         });
       }
+
+      // Update confirmedBySishya on the handover record
+      await updateDoc(doc(db, 'samagriHandovers', handover.id), {
+        confirmedBySishya: true,
+      });
 
       setReceiptConfirmed(true);
       setReceiptRecord({

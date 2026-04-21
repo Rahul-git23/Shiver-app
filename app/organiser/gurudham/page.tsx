@@ -108,12 +108,22 @@ export default function GurudhamUpdatesPage() {
             .map(d => ({ id: d.id, ...d.data() }));
           setReceipts(myReceipts);
 
-          // Get existing handovers
+          // Get existing handovers — also check samagriSishyaReceipts to sync confirmedBySishya
           const handoverSnap = await getDocs(collection(db, 'samagriHandovers'));
           const myHandovers = handoverSnap.docs
             .filter(d => d.data().shivirId === sid && d.data().handedBy === phone)
             .map(d => ({ id: d.id, ...d.data() }));
-          setHandovers(myHandovers);
+
+          // Sync confirmedBySishya from samagriSishyaReceipts
+          const sishyaReceiptSnap = await getDocs(collection(db, 'samagriSishyaReceipts'));
+          const syncedHandovers = myHandovers.map(h => {
+            const receipt = sishyaReceiptSnap.docs.find(d =>
+              d.data().shivirId === sid && d.data().aayojakPhone === phone &&
+              d.data().logisticsId === (h as any).logisticsId
+            );
+            return receipt ? { ...h, confirmedBySishya: true } : h;
+          });
+          setHandovers(syncedHandovers);
 
           // Step 4 — Get samagriReturns from Sishya
           const returnsSnap = await getDocs(collection(db, 'samagriReturns'));
