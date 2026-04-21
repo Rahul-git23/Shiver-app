@@ -80,7 +80,16 @@ export default function SishyaSamagriPage() {
           const shivirHandovers = handoverSnap.docs
             .filter(d => d.data().shivirId === sid)
             .map(d => ({ id: d.id, ...d.data() }));
-          setAllHandovers(shivirHandovers);
+
+          // Sync confirmedBySishya from samagriSishyaReceipts
+          const sishyaReceiptSnap = await getDocs(collection(db, 'samagriSishyaReceipts'));
+          const syncedHandovers = shivirHandovers.map((h: any) => {
+            const receipt = sishyaReceiptSnap.docs.find(d =>
+              d.data().shivirId === sid && d.data().logisticsId === h.logisticsId
+            );
+            return receipt ? { ...h, confirmedBySishya: true } : h;
+          });
+          setAllHandovers(syncedHandovers);
 
           // Find handover TO this Sishya
           const myHandover = shivirHandovers.find((h: any) => h.handedTo === phone);
@@ -97,13 +106,18 @@ export default function SishyaSamagriPage() {
             }
           }
 
-          // Check Step B — return confirmed by any sishya
+          // Check Step B — return confirmed by anyone in this Shivir
           const returnSnap = await getDocs(collection(db, 'samagriReturns'));
-          const myReturn = returnSnap.docs
-            .find(d => d.data().shivirId === sid && d.data().returnedBy === phone);
-          if (myReturn) {
+          const anyReturn = returnSnap.docs
+            .find(d => d.data().shivirId === sid);
+          if (anyReturn) {
+            // Enrich with names
+            const returnerSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', anyReturn.data().returnedBy)));
+            const aayojakReturnSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', anyReturn.data().returnedTo)));
+            const returnerName = !returnerSnap.empty ? returnerSnap.docs[0].data().name : anyReturn.data().returnedBy;
+            const aayojakName = !aayojakReturnSnap.empty ? aayojakReturnSnap.docs[0].data().name : anyReturn.data().returnedTo;
             setReturnConfirmed(true);
-            setReturnRecord({ id: myReturn.id, ...myReturn.data() });
+            setReturnRecord({ id: anyReturn.id, ...anyReturn.data(), returnerName, aayojakName });
           }
         }
       }
@@ -189,6 +203,7 @@ export default function SishyaSamagriPage() {
       });
 
       const { createNotificationForMany } = await import('@/lib/notifications');
+      // Notify the Aayojak
       await createNotificationForMany({
         phones: [returnToAayojak],
         title: '📦 Sishya Returned Samagri',
@@ -196,6 +211,20 @@ export default function SishyaSamagriPage() {
         type: 'samagri_return_from_sishya',
         shivirId,
       });
+      // Notify all other Sishyas in this Shivir
+      const allSishyaSnap = await getDocs(query(collection(db, 'shivirSishya'), where('shivirId', '==', shivirId)));
+      const otherSishyaPhones = allSishyaSnap.docs
+        .map(d => d.data().phone)
+        .filter(p => p !== sishyaPhone);
+      if (otherSishyaPhones.length > 0) {
+        await createNotificationForMany({
+          phones: otherSishyaPhones,
+          title: '📦 Samagri Returned to Aayojak',
+          body: `${returnBundles} bundles have been returned to Aayojak by a fellow Sishya.`,
+          type: 'samagri_return_from_sishya',
+          shivirId,
+        });
+      }
 
       setReturnConfirmed(true);
       setReturnRecord({ bundlesReturned: Number(returnBundles), returnedTo: returnToAayojak });
@@ -325,7 +354,10 @@ export default function SishyaSamagriPage() {
                     <div className="bg-green-50 rounded-xl p-3">
                       <p className="text-green-700 text-sm font-semibold">✅ Bundles returned to Aayojak</p>
                       <p className="text-green-600 text-xs mt-1">
-                        {returnRecord.bundlesReturned} bundles returned
+                        {returnRecord.returnerName} Ji returned {returnRecord.bundlesReturned} bundles
+                      </p>
+                      <p className="text-green-600 text-xs">
+                        Returned to: {returnRecord.aayojakName} Ji
                       </p>
                     </div>
                   ) : (
