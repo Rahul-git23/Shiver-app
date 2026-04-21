@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function AddCollectionPage() {
   const [userData, setUserData] = useState<any>(null);
@@ -125,7 +125,7 @@ export default function AddCollectionPage() {
         addedByName: userData.name,
         isReturning,
         status: 'active',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       });
 
       setMessage('✅ Sahyog recorded successfully! 🙏');

@@ -64,7 +64,9 @@ export default function PaymentApprovalPage() {
       .filter(d =>
         d.data().shivirId === sid &&
         d.data().requestPayment === true &&
-        (d.data().payStatus === 'pending' || d.data().approvalStatus === 'pending_aayojak_payment' || d.data().approvalStatus === 'pending_aayojak')
+        d.data().payStatus !== 'approved' &&
+        d.data().payStatus !== 'rejected' &&
+        (d.data().approvalStatus === 'pending_aayojak' || d.data().approvalStatus === 'pending_aayojak_payment')
       )
       .map(d => ({
         id: d.id,
@@ -103,10 +105,11 @@ export default function PaymentApprovalPage() {
         shivirId,
       });
 
-      setRequests(prev => prev.filter(r => r.id !== request.id));
+      const remaining = requests.filter(r => r.id !== request.id);
+      setRequests(remaining);
 
       // If no more pending — go to dashboard
-      if (requests.length <= 1) {
+      if (remaining.length === 0) {
         window.location.href = '/organiser';
       }
     } catch (e) {
@@ -140,11 +143,12 @@ export default function PaymentApprovalPage() {
         shivirId,
       });
 
-      setRequests(prev => prev.filter(r => r.id !== request.id));
+      const remaining = requests.filter(r => r.id !== request.id);
+      setRequests(remaining);
       setRejectingId(null);
       setRejectRemark('');
 
-      if (requests.length <= 1) {
+      if (remaining.length === 0) {
         window.location.href = '/organiser';
       }
     } catch (e) {

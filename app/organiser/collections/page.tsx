@@ -20,7 +20,7 @@ export default function CollectionsPage() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) { window.location.href = '/login'; return; }
+      if (!currentUser || !currentUser.phoneNumber) { window.location.href = '/login'; return; }
 
       // Get user data
       const userQ = query(collection(db, 'users'), where('phone', '==', currentUser.phoneNumber));

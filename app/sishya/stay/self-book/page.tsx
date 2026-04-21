@@ -5,7 +5,7 @@ import { auth, db } from '@/lib/firebase';
 import { getStorage } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, getDocs, doc, setDoc, deleteDoc, serverTimestamp
+  collection, getDocs, doc, setDoc, deleteDoc, serverTimestamp, runTransaction
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -252,32 +252,38 @@ export default function SelfBookPage() {
             for (const phone of phonesToNotify) {
               const approvalId = `${hotel.id}_room${room.roomNumber}_${phone}`;
 
-              const appSnap = await getDocs(collection(db, 'sishyaRoomApprovals'));
-              const exists = appSnap.docs.find(d => d.id === approvalId);
-              if (!exists) {
-                const roommatePhones = room.sishyaPhones.filter(p => p !== phone);
-                const roommateNames = roommatePhones
-                  .map(p => {
-                    if (p === userPhone) return `${userName || 'Booker'} Ji`;
-                    const s = allSishya.find(x => x.phone === p);
-                    return s ? `${s.name} Ji` : p;
-                  })
-                  .join(', ');
+              const approvalRef = doc(db, 'sishyaRoomApprovals', approvalId);
+              const roommatePhones = room.sishyaPhones.filter(p => p !== phone);
+              const roommateNames = roommatePhones
+                .map(p => {
+                  if (p === userPhone) return `${userName || 'Booker'} Ji`;
+                  const s = allSishya.find(x => x.phone === p);
+                  return s ? `${s.name} Ji` : p;
+                })
+                .join(', ');
 
-                await setDoc(doc(db, 'sishyaRoomApprovals', approvalId), {
-                  bookingId: hotel.id,
-                  shivirId,
-                  roomNumber: room.roomNumber,
-                  sishyaPhone: phone,
-                  bookedBy: userPhone,
-                  bookedByName: userName,
-                  hotelName: hotel.hotelName.trim(),
-                  roommateNames: roommateNames || 'No other roommates',
-                  status: 'pending',
-                  rejectionRemark: '',
-                  createdAt: serverTimestamp(),
-                });
+              let isNew = false;
+              await runTransaction(db, async (transaction) => {
+                const approvalDoc = await transaction.get(approvalRef);
+                if (!approvalDoc.exists()) {
+                  isNew = true;
+                  transaction.set(approvalRef, {
+                    bookingId: hotel.id,
+                    shivirId,
+                    roomNumber: room.roomNumber,
+                    sishyaPhone: phone,
+                    bookedBy: userPhone,
+                    bookedByName: userName,
+                    hotelName: hotel.hotelName.trim(),
+                    roommateNames: roommateNames || 'No other roommates',
+                    status: 'pending',
+                    rejectionRemark: '',
+                    createdAt: serverTimestamp(),
+                  });
+                }
+              });
 
+              if (isNew) {
                 const roommateText = roommateNames
                   ? `You will be sharing with: ${roommateNames}.`
                   : 'You have been assigned this room.';

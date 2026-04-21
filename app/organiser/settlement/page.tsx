@@ -60,7 +60,7 @@ export default function SettlementPage() {
         await uploadBytes(storageRef, screenshot);
         screenshotUrl = await getDownloadURL(storageRef);
       }
-      await markSettlementSent(settlement.id, utr.trim(), screenshotUrl);
+      await markSettlementSent(settlement.id, utr.trim(), currentUser.phoneNumber || '', screenshotUrl);
       setMessage('✅ Payment marked as sent! Super Admin will confirm shortly.');
       setSettlement({ ...settlement, status: 'sent' });
     } catch (err: any) {

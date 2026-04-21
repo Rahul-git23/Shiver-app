@@ -55,12 +55,14 @@ export async function markSettlementSent(
   settlementId: string,
   utrNumber: string,
   sentByName: string,
+  screenshotUrl?: string,
 ) {
   const ref = doc(db, 'settlements', settlementId);
   return await updateDoc(ref, {
     status: 'sent',
     utrNumber,
     sentByName,
+    ...(screenshotUrl ? { screenshotUrl } : {}),
     sentAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

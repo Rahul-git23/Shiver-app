@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { createNotificationForMany } from '@/lib/notifications';
 
 export default function AddTaskPage() {
@@ -78,7 +78,7 @@ export default function AddTaskPage() {
         status: 'todo',
         createdBy: userData.phone,
         createdByName: userData.name,
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       });
 
       setMessage('✅ Task created successfully!');

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { createNotificationForMany } from '@/lib/notifications';
 
 const DEFAULT_CATEGORIES = [
@@ -83,7 +83,7 @@ export default function AddExpensePage() {
         proposedByName: userData.name,
         seenBy: [userData.phone],
         votes: [],
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       });
 
       setMessage('✅ Expense added successfully!');
