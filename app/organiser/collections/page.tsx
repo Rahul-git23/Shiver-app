@@ -17,6 +17,8 @@ export default function CollectionsPage() {
   const [currentUserPhone, setCurrentUserPhone] = useState('');
   const [refundRemarks, setRefundRemarks] = useState<{[key: string]: string}>({});
   const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [refundOpenId, setRefundOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -208,75 +210,112 @@ export default function CollectionsPage() {
               <p className="text-gray-400 text-sm">Tap "+ Add" to record first Sahyog</p>
             </div>
           ) : (
+            <>
+            {/* Click-away backdrop for 3-dots menu */}
+            {menuOpenId && (
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
+            )}
+
             <div className="space-y-3">
-              {collections.map((col: any) => (
-                <div key={col.id} className="border border-orange-100 rounded-xl p-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-gray-700">{col.sadhakName} Ji</p>
-                        {col.isReturning && (
-                          <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
-                            Returning 🙏
-                          </span>
+              {collections.map((col: any) => {
+                const canRefund = col.status === 'active' && col.addedBy === currentUserPhone;
+                const isRefundOpen = refundOpenId === col.id;
+
+                return (
+                  <div key={col.id} className="border border-orange-100 rounded-xl p-3 relative">
+
+                    {/* 3-dots menu — only for own active collections */}
+                    {canRefund && (
+                      <div className="absolute top-3 right-3 z-20">
+                        <button
+                          onClick={() => setMenuOpenId(menuOpenId === col.id ? null : col.id)}
+                          className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 text-base font-bold">
+                          ···
+                        </button>
+                        {menuOpenId === col.id && (
+                          <div className="absolute right-0 top-8 bg-white border border-gray-100 rounded-xl shadow-lg min-w-32 overflow-hidden">
+                            <button
+                              onClick={() => {
+                                setRefundOpenId(isRefundOpen ? null : col.id);
+                                setMenuOpenId(null);
+                              }}
+                              className="w-full text-left px-4 py-2.5 text-sm text-red-500 font-medium hover:bg-red-50">
+                              ↩ Refund
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <p className="text-gray-500 text-sm">{col.city}{col.state ? ', ' + col.state : ''}</p>
-                      <p className="text-gray-400 text-xs mt-1">
-                        {formatDate(col.createdAt)} • {col.paymentMode}
-                      </p>
-                      <p className="text-gray-400 text-xs">
-                        Collected by: {col.addedByName}
-                      </p>
+                    )}
+
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-gray-700">{col.sadhakName} Ji</p>
+                          {col.isReturning && (
+                            <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
+                              Returning 🙏
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-gray-500 text-sm">{col.city}{col.state ? ', ' + col.state : ''}</p>
+                        <p className="text-gray-400 text-xs mt-1">
+                          {formatDate(col.createdAt)} • {col.paymentMode}
+                        </p>
+                        <p className="text-gray-400 text-xs">
+                          Collected by: {col.addedByName}
+                        </p>
+                      </div>
+                      <div className="text-right pr-8">
+                        <p className="font-bold text-orange-600 text-lg">
+                          {formatAmount(col.amount)}
+                        </p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          col.status === 'cancelled' ? 'bg-red-100 text-red-500' :
+                          col.status === 'refunded' ? 'bg-yellow-100 text-yellow-600' :
+                          'bg-green-100 text-green-600'
+                        }`}>
+                          {col.status || 'active'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-orange-600 text-lg">
-                        {formatAmount(col.amount)}
+
+                    {col.remark && (
+                      <p className="text-gray-400 text-xs mt-2 border-t pt-2">
+                        📝 {col.remark}
                       </p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        col.status === 'cancelled' ? 'bg-red-100 text-red-500' :
-                        col.status === 'refunded' ? 'bg-yellow-100 text-yellow-600' :
-                        'bg-green-100 text-green-600'
-                      }`}>
-                        {col.status || 'active'}
-                      </span>
-                    </div>
+                    )}
+
+                    {/* Refund section — expanded on demand */}
+                    {canRefund && isRefundOpen && (
+                      <div className="flex gap-2 items-center mt-2 border-t pt-2">
+                        <input
+                          type="text"
+                          placeholder="Reason for refund (required)"
+                          value={refundRemarks[col.id] || ''}
+                          onChange={e => setRefundRemarks(prev => ({ ...prev, [col.id]: e.target.value }))}
+                          className="flex-1 text-xs px-3 border border-red-300 rounded-lg bg-white focus:outline-none"
+                          style={{ height: '32px' }}
+                        />
+                        <button
+                          onClick={() => handleRefund(col)}
+                          disabled={refundingId === col.id}
+                          className="text-xs px-4 bg-red-50 text-red-600 border border-red-300 rounded-lg disabled:opacity-50"
+                          style={{ height: '32px' }}>
+                          {refundingId === col.id ? '...' : 'Refund'}
+                        </button>
+                      </div>
+                    )}
+
+                    {col.status === 'refunded' && col.refundRemark && (
+                      <p className="text-orange-400 text-xs mt-2 border-t pt-2">
+                        ↩ Refunded · {col.refundRemark}
+                      </p>
+                    )}
                   </div>
-                  {col.remark && (
-                    <p className="text-gray-400 text-xs mt-2 border-t pt-2">
-                      📝 {col.remark}
-                    </p>
-                  )}
-
-                  {/* Refund row — only for own active collections */}
-                  {col.status === 'active' && col.addedBy === currentUserPhone && (
-                    <div className="flex gap-2 items-center mt-2 border-t pt-2">
-                      <input
-                        type="text"
-                        placeholder="Remark (required), WHY?"
-                        value={refundRemarks[col.id] || ''}
-                        onChange={e => setRefundRemarks(prev => ({ ...prev, [col.id]: e.target.value }))}
-                        className="flex-1 text-xs px-3 border border-green-400 rounded-lg bg-white focus:outline-none"
-                        style={{ height: '32px' }}
-                      />
-                      <button
-                        onClick={() => handleRefund(col)}
-                        disabled={refundingId === col.id}
-                        className="text-xs px-4 bg-orange-50 text-orange-700 border border-orange-300 rounded-lg disabled:opacity-50"
-                        style={{ height: '32px' }}>
-                        {refundingId === col.id ? '...' : 'Refund'}
-                      </button>
-                    </div>
-                  )}
-
-                  {col.status === 'refunded' && col.refundRemark && (
-                    <p className="text-orange-400 text-xs mt-2 border-t pt-2">
-                      ↩ Refunded · {col.refundRemark}
-                    </p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
+            </>
           )}
         </div>
 

@@ -42,6 +42,7 @@ export default function SuperAdminPage() {
   const [shivirs, setShivirs] = useState<any[]>([]);
   const [shivirMessage, setShivirMessage] = useState('');
   const [savingShivir, setSavingShivir] = useState(false);
+  const [shivirStats, setShivirStats] = useState<{ [id: string]: { collections: number; expenses: number } }>({});
   const [newShivir, setNewShivir] = useState({
     name: '', city: '', state: '', venue: '',
     gmapLink: '', startDate: '', endDate: '', description: '',
@@ -216,6 +217,25 @@ export default function SuperAdminPage() {
   const loadShivirs = async () => {
     const snapshot = await getDocs(collection(db, 'shivirs'));
     setShivirs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    // Fetch stats for all shivirs in parallel
+    const [colSnap, expSnap] = await Promise.all([
+      getDocs(collection(db, 'contributions')),
+      getDocs(collection(db, 'expenses')),
+    ]);
+    const stats: { [id: string]: { collections: number; expenses: number } } = {};
+    colSnap.docs.forEach(d => {
+      const sid = d.data().shivirId;
+      const amt = d.data().status !== 'cancelled' && d.data().status !== 'refunded' ? (d.data().amount || 0) : 0;
+      if (!stats[sid]) stats[sid] = { collections: 0, expenses: 0 };
+      stats[sid].collections += amt;
+    });
+    expSnap.docs.forEach(d => {
+      const sid = d.data().shivirId;
+      const amt = d.data().status === 'approved' ? (d.data().estimatedAmount || d.data().amount || 0) : 0;
+      if (!stats[sid]) stats[sid] = { collections: 0, expenses: 0 };
+      stats[sid].expenses += amt;
+    });
+    setShivirStats(stats);
   };
 
   const addUser = async () => {
@@ -684,19 +704,32 @@ export default function SuperAdminPage() {
               <h2 className="font-bold text-gray-700 mb-4">All Shivirs ({shivirs.length})</h2>
               {shivirs.length === 0 ? <p className="text-gray-400 text-center py-4">No Shivirs created yet</p> : (
                 <div className="space-y-3">
-                  {shivirs.map((s) => (
-                    <div key={s.id} 
-                      onClick={() => window.location.href = `/super-admin/shivir/${s.id}`}
-                      className="p-4 bg-orange-50 rounded-xl cursor-pointer hover:bg-orange-100 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold text-gray-700">{s.name}</h3>
-                        <span className="bg-orange-100 text-orange-600 text-xs px-2 py-1 rounded-full capitalize">{s.status}</span>
+                  {shivirs.map((s) => {
+                    const stats = shivirStats[s.id] || { collections: 0, expenses: 0 };
+                    return (
+                      <div key={s.id}
+                        onClick={() => window.location.href = `/super-admin/shivir/${s.id}`}
+                        className="p-4 bg-orange-50 rounded-xl cursor-pointer hover:bg-orange-100 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-gray-700">{s.name}</h3>
+                          <span className="bg-orange-100 text-orange-600 text-xs px-2 py-1 rounded-full capitalize">{s.status}</span>
+                        </div>
+                        <p className="text-gray-500 text-sm mt-1">📍 {s.city}{s.state ? ', ' + s.state : ''}</p>
+                        <p className="text-gray-500 text-sm">📅 {formatShivirDates(s.startDate, s.endDate)}</p>
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <div className="bg-green-50 border border-green-100 rounded-xl p-2 text-center">
+                            <p className="text-green-600 text-xs font-medium">Collections</p>
+                            <p className="text-green-700 font-bold text-sm">₹{stats.collections.toLocaleString('en-IN')}</p>
+                          </div>
+                          <div className="bg-red-50 border border-red-100 rounded-xl p-2 text-center">
+                            <p className="text-red-500 text-xs font-medium">Expenses</p>
+                            <p className="text-red-600 font-bold text-sm">₹{stats.expenses.toLocaleString('en-IN')}</p>
+                          </div>
+                        </div>
+                        <p className="text-orange-400 text-xs mt-2 font-medium">Tap to view details →</p>
                       </div>
-                      <p className="text-gray-500 text-sm mt-1">📍 {s.city}{s.state ? ', ' + s.state : ''}</p>
-                      <p className="text-gray-500 text-sm">📅 {formatShivirDates(s.startDate, s.endDate)}</p>
-                      <p className="text-orange-400 text-xs mt-2 font-medium">Tap to view details →</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

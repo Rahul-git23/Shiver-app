@@ -34,10 +34,15 @@ export default function AddCollectionPage() {
       }
       setUserData({ id: userSnap.docs[0].id, ...userSnap.docs[0].data() });
 
-      const orgQ = query(collection(db, 'shivirOrganisers'), where('phone', '==', currentUser.phoneNumber));
-      const orgSnap = await getDocs(orgQ);
-      if (!orgSnap.empty) {
-        const shivirId = orgSnap.docs[0].data().shivirId;
+      const savedShivirId = localStorage.getItem('selectedShivirId');
+      const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
+      const myShivirIds = orgSnap.docs
+        .filter(d => d.data().phone === currentUser.phoneNumber)
+        .map(d => d.data().shivirId);
+
+      if (myShivirIds.length > 0) {
+        const shivirId = (savedShivirId && myShivirIds.includes(savedShivirId))
+          ? savedShivirId : myShivirIds[0];
         const shivirSnap = await getDocs(query(collection(db, 'shivirs'), where('__name__', '==', shivirId)));
         if (!shivirSnap.empty) {
           setShivir({ id: shivirSnap.docs[0].id, ...shivirSnap.docs[0].data() });
@@ -127,6 +132,24 @@ export default function AddCollectionPage() {
         status: 'active',
         createdAt: serverTimestamp(),
       });
+
+      // Notify all other organisers of this Shivir
+      try {
+        const { createNotificationForMany } = await import('@/lib/notifications');
+        const orgSnap2 = await getDocs(query(collection(db, 'shivirOrganisers'), where('shivirId', '==', shivir.id)));
+        const otherOrganisers = orgSnap2.docs
+          .map(d => d.data().phone)
+          .filter((p: string) => p !== userData.phone);
+        if (otherOrganisers.length > 0) {
+          await createNotificationForMany({
+            phones: otherOrganisers,
+            title: '💰 New Collection Recorded',
+            body: `${userData.name} collected ₹${Number(amount).toLocaleString('en-IN')} from ${sadhakName.trim()} Ji (${paymentMode})`,
+            type: 'collection_added',
+            shivirId: shivir.id,
+          });
+        }
+      } catch (_) {}
 
       setMessage('✅ Sahyog recorded successfully! 🙏');
       setPhone('');
