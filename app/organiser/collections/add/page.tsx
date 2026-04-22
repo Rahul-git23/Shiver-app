@@ -20,6 +20,10 @@ export default function AddCollectionPage() {
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [remark, setRemark] = useState('');
 
+  const [pincode, setPincode] = useState('');
+  const [pincodeLoading, setPincodeLoading] = useState(false);
+  const [pincodeError, setPincodeError] = useState('');
+
   const [existingDonation, setExistingDonation] = useState<any>(null);
   const [isReturning, setIsReturning] = useState(false);
   const [phoneChecked, setPhoneChecked] = useState(false);
@@ -101,6 +105,28 @@ export default function AddCollectionPage() {
     setPhoneChecked(true);
   };
 
+  const lookupPincode = async (value: string) => {
+    setPincode(value);
+    setPincodeError('');
+    if (value.length !== 6) return;
+    setPincodeLoading(true);
+    try {
+      const res = await fetch(`https://api.postalpincode.in/pincode/${value}`);
+      const data = await res.json();
+      if (data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+        const po = data[0].PostOffice[0];
+        setCity(po.District || po.Block || '');
+        setState(po.State || '');
+        setPincodeError('');
+      } else {
+        setPincodeError('Pincode not found. Please enter city/state manually.');
+      }
+    } catch {
+      setPincodeError('Could not fetch pincode data. Please enter manually.');
+    }
+    setPincodeLoading(false);
+  };
+
   const formatDate = (timestamp: any) => {
     if (!timestamp) return '';
     const date = timestamp.seconds ? new Date(timestamp.seconds * 1000) : new Date(timestamp);
@@ -156,6 +182,8 @@ export default function AddCollectionPage() {
       setSadhakName('');
       setCity('');
       setState('');
+      setPincode('');
+      setPincodeError('');
       setAmount('');
       setPaymentMode('Cash');
       setRemark('');
@@ -264,15 +292,40 @@ export default function AddCollectionPage() {
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />
               </div>
 
+              <div>
+                <label className="block text-gray-600 text-sm font-medium mb-1">Pincode</label>
+                <div className="relative">
+                  <input
+                    type="tel"
+                    placeholder="Enter 6-digit pincode"
+                    value={pincode}
+                    onChange={(e) => lookupPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400"
+                  />
+                  {pincodeLoading && (
+                    <span className="absolute right-3 top-3.5 text-orange-400 text-sm">Looking up...</span>
+                  )}
+                </div>
+                {pincodeError && (
+                  <p className="text-orange-500 text-xs mt-1">{pincodeError}</p>
+                )}
+              </div>
+
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-gray-600 text-sm font-medium mb-1">City</label>
-                  <input type="text" placeholder="City" value={city}
+                  <label className="block text-gray-600 text-sm font-medium mb-1">
+                    District / City
+                    {city && <span className="text-green-500 ml-1 text-xs">✓ auto-filled</span>}
+                  </label>
+                  <input type="text" placeholder="District / City" value={city}
                     onChange={(e) => setCity(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-gray-600 text-sm font-medium mb-1">State</label>
+                  <label className="block text-gray-600 text-sm font-medium mb-1">
+                    State
+                    {state && <span className="text-green-500 ml-1 text-xs">✓ auto-filled</span>}
+                  </label>
                   <input type="text" placeholder="State" value={state}
                     onChange={(e) => setState(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />

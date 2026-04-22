@@ -94,6 +94,14 @@ export default function DispatchDashboard() {
             <p className="text-gray-500 text-sm">Jai Gurudev, {userData?.name}!</p>
           </div>
           <div className="flex items-center gap-3">
+            <button onClick={() => window.location.href = '/profile'}
+              className="relative w-9 h-9 rounded-full overflow-hidden border-2 border-orange-200 flex-shrink-0">
+              {userData?.photoURL ? (
+                <img src={userData.photoURL} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-orange-100 flex items-center justify-center text-base">🙏</div>
+              )}
+            </button>
             <button onClick={() => window.location.href = '/notifications'}
               className="relative">
               <span className="text-2xl">🔔</span>

@@ -149,7 +149,7 @@ export default function OrganiserSishyaPage() {
                         const done = i === 0 ? arr?.hotelName
                           : i === 1 ? (arr?.breakfastTime || arr?.lunchTime || arr?.dinnerTime)
                           : i === 2 ? arr?.pickupPoint
-                          : arr?.volunteer1Name;
+                          : arr?.volunteers?.[0]?.name;
                         return (
                           <span key={item}
                             className={`text-xs px-2 py-0.5 rounded-full font-medium ${

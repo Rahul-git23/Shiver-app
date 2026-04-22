@@ -10,6 +10,7 @@ export default function SelectShivirPage() {
   const [shivirs, setShivirs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selecting, setSelecting] = useState<string | null>(null);
+  const [userName, setUserName] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -22,6 +23,7 @@ export default function SelectShivirPage() {
       if (!userDoc || userDoc.data().role !== 'organiser') {
         window.location.href = '/access-denied'; return;
       }
+      setUserName(userDoc.data().name || '');
 
       // Get ALL Shivirs this Aayojak is assigned to
       const orgSnap = await getDocs(collection(db, 'shivirOrganisers'));
@@ -37,6 +39,7 @@ export default function SelectShivirPage() {
       // If only one Shivir — auto select and go to dashboard
       if (myShivirIds.length === 1) {
         localStorage.setItem('selectedShivirId', myShivirIds[0]);
+        sessionStorage.setItem('shivirSelected', 'true');
         window.location.href = '/organiser';
         return;
       }
@@ -56,6 +59,7 @@ export default function SelectShivirPage() {
   const selectShivir = (shivirId: string) => {
     setSelecting(shivirId);
     localStorage.setItem('selectedShivirId', shivirId);
+    sessionStorage.setItem('shivirSelected', 'true');
     window.location.href = '/organiser';
   };
 
@@ -73,6 +77,9 @@ export default function SelectShivirPage() {
         <div className="bg-white rounded-2xl shadow p-5 mb-6 text-center">
           <div className="text-4xl mb-3">🙏</div>
           <h1 className="text-xl font-bold text-orange-600">Jai Gurudev</h1>
+          {userName && (
+            <p className="text-gray-700 font-semibold text-base mt-1">{userName} Ji</p>
+          )}
           <p className="text-gray-500 text-sm mt-1">Select the Shivir you want to manage</p>
         </div>
 

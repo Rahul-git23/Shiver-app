@@ -23,6 +23,7 @@ export default function OrganiserPage() {
   const [hasPendingPayment, setHasPendingPayment] = useState(false);
   const [voting, setVoting] = useState(false);
   const [currentUserPhone, setCurrentUserPhone] = useState('');
+  const [multiShivir, setMultiShivir] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -47,16 +48,24 @@ export default function OrganiserPage() {
 
       if (myShivirIds.length === 0) { setLoading(false); return; }
 
-      // If multiple Shivirs and none selected yet — go to selection page
+      if (myShivirIds.length > 1) setMultiShivir(true);
+
+      // For multi-shivir organisers: always show selection page at start of each session
       const savedShivirId = localStorage.getItem('selectedShivirId');
-      if (myShivirIds.length > 1 && !savedShivirId) {
-        window.location.href = '/organiser/select-shivir';
-        return;
+      if (myShivirIds.length > 1) {
+        const sessionSelected = sessionStorage.getItem('shivirSelected');
+        if (!sessionSelected) {
+          // New session — clear any stale selection and go to picker
+          localStorage.removeItem('selectedShivirId');
+          window.location.href = '/organiser/select-shivir';
+          return;
+        }
       }
 
       // If saved Shivir is no longer assigned — clear and reselect
       if (savedShivirId && !myShivirIds.includes(savedShivirId)) {
         localStorage.removeItem('selectedShivirId');
+        sessionStorage.removeItem('shivirSelected');
         window.location.href = '/organiser/select-shivir';
         return;
       }
@@ -252,6 +261,14 @@ export default function OrganiserPage() {
             <p className="text-gray-500 text-sm">Aayojak Dashboard</p>
           </div>
           <div className="flex items-center gap-3">
+            <button onClick={() => window.location.href = '/profile'}
+              className="relative w-9 h-9 rounded-full overflow-hidden border-2 border-orange-200 flex-shrink-0">
+              {userData?.photoURL ? (
+                <img src={userData.photoURL} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-orange-100 flex items-center justify-center text-base">🙏</div>
+              )}
+            </button>
             <button onClick={() => window.location.href = '/notifications'}
               className="relative">
               <span className="text-2xl">🔔</span>
@@ -262,15 +279,22 @@ export default function OrganiserPage() {
               )}
             </button>
             <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                localStorage.removeItem('selectedShivirId');
-                window.location.href = '/organiser/select-shivir';
-              }}
-              className="text-orange-500 text-xs font-medium border border-orange-300 px-2 py-1 rounded-lg">
-              Switch Shivir
-            </button>
-            <button onClick={() => { auth.signOut(); window.location.href = '/login'; }}
+            {multiShivir && (
+              <button
+                onClick={() => {
+                  localStorage.removeItem('selectedShivirId');
+                  sessionStorage.removeItem('shivirSelected');
+                  window.location.href = '/organiser/select-shivir';
+                }}
+                className="text-orange-500 text-xs font-medium border border-orange-300 px-2 py-1 rounded-lg">
+                Switch Shivir
+              </button>
+            )}
+            <button onClick={() => {
+              sessionStorage.removeItem('shivirSelected');
+              auth.signOut();
+              window.location.href = '/login';
+            }}
               className="text-red-400 text-sm font-medium">Logout</button>
           </div>
           </div>

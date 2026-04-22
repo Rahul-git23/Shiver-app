@@ -513,13 +513,24 @@ export default function SuperAdminPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className={`font-medium ${u.status === 'deactivated' ? 'text-gray-400' : 'text-gray-700'}`}>{u.name}</p>
-                            <p className="text-gray-400 text-sm">{u.phone}</p>
-                            <span className="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded-full capitalize">
-                              {u.role === 'organiser' ? 'Aayojak' : u.role}
-                            </span>
+                        <div>
+                          <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {/* Avatar */}
+                            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-orange-200 flex-shrink-0">
+                              {u.photoURL ? (
+                                <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full bg-orange-100 flex items-center justify-center text-lg">🙏</div>
+                              )}
+                            </div>
+                            <div>
+                              <p className={`font-medium ${u.status === 'deactivated' ? 'text-gray-400' : 'text-gray-700'}`}>{u.name}</p>
+                              <p className="text-gray-400 text-sm">{u.phone}</p>
+                              <span className="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded-full capitalize">
+                                {u.role === 'organiser' ? 'Aayojak' : u.role}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-col items-end gap-1.5">
                             <span className={`text-xs px-2 py-1 rounded-full font-medium ${
@@ -565,6 +576,50 @@ export default function SuperAdminPage() {
                             )}
                           </div>
                         </div>
+
+                        {/* Photo Approval */}
+                        {u.photoStatus === 'pending' && u.photoPending && (
+                          <div className="mt-3 pt-3 border-t border-orange-100">
+                            <p className="text-xs text-gray-500 mb-2">📸 Pending Photo Approval:</p>
+                            <div className="flex items-center gap-3">
+                              <div className="w-16 h-16 rounded-xl overflow-hidden border border-orange-200 flex-shrink-0">
+                                <img src={u.photoPending} alt="Pending" className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex gap-2 flex-1">
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const pendingUrl = u.photoPending;
+                                    await updateDoc(doc(db, 'users', u.id), {
+                                      photoURL: pendingUrl,
+                                      photoStatus: 'approved',
+                                      photoPending: null,
+                                    });
+                                    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, photoURL: pendingUrl, photoStatus: 'approved', photoPending: null } : x));
+                                  }}
+                                  className="flex-1 bg-green-500 text-white text-xs font-bold py-2 rounded-xl">
+                                  ✅ Approve
+                                </button>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const reason = prompt('Reason for rejection?');
+                                    if (!reason) return;
+                                    await updateDoc(doc(db, 'users', u.id), {
+                                      photoStatus: 'rejected',
+                                      photoPending: null,
+                                      photoRejectedReason: reason,
+                                    });
+                                    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, photoStatus: 'rejected', photoPending: null, photoRejectedReason: reason } : x));
+                                  }}
+                                  className="flex-1 bg-red-50 text-red-500 border border-red-300 text-xs font-bold py-2 rounded-xl">
+                                  ❌ Reject
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       )}
                     </div>
                   ))}
