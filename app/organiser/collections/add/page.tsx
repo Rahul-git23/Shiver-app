@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { INDIA_STATES, INDIA_DISTRICTS } from '@/lib/india-locations';
 
 export default function AddCollectionPage() {
   const [userData, setUserData] = useState<any>(null);
@@ -23,6 +24,8 @@ export default function AddCollectionPage() {
   const [pincode, setPincode] = useState('');
   const [pincodeLoading, setPincodeLoading] = useState(false);
   const [pincodeError, setPincodeError] = useState('');
+  const [districtPincodes, setDistrictPincodes] = useState<string[]>([]);
+  const [districtPincodesLoading, setDistrictPincodesLoading] = useState(false);
 
   const [existingDonation, setExistingDonation] = useState<any>(null);
   const [isReturning, setIsReturning] = useState(false);
@@ -105,6 +108,49 @@ export default function AddCollectionPage() {
     setPhoneChecked(true);
   };
 
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    setCity('');
+    setPincode('');
+    setDistrictPincodes([]);
+    setPincodeError('');
+  };
+
+  const fetchDistrictPincodes = async (district: string) => {
+    if (!district) return;
+    setDistrictPincodesLoading(true);
+    try {
+      const res = await fetch(`https://api.postalpincode.in/postoffice/${encodeURIComponent(district)}`);
+      const data = await res.json();
+      if (data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+        const pincodes = [...new Set<string>(
+          data[0].PostOffice
+            .filter((po: any) => po.District?.toLowerCase() === district.toLowerCase())
+            .map((po: any) => String(po.Pincode))
+        )].sort();
+        setDistrictPincodes(pincodes);
+      } else {
+        setDistrictPincodes([]);
+      }
+    } catch {
+      setDistrictPincodes([]);
+    }
+    setDistrictPincodesLoading(false);
+  };
+
+  const handleDistrictChange = (district: string) => {
+    setCity(district);
+    setPincode('');
+    setDistrictPincodes([]);
+    setPincodeError('');
+    if (!state && district) {
+      const parentState = Object.entries(INDIA_DISTRICTS)
+        .find(([, districts]) => districts.includes(district))?.[0];
+      if (parentState) setState(parentState);
+    }
+    if (district) fetchDistrictPincodes(district);
+  };
+
   const lookupPincode = async (value: string) => {
     setPincode(value);
     setPincodeError('');
@@ -115,14 +161,19 @@ export default function AddCollectionPage() {
       const data = await res.json();
       if (data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
         const po = data[0].PostOffice[0];
-        setCity(po.District || po.Block || '');
-        setState(po.State || '');
+        const fetchedDistrict = po.District || po.Block || '';
+        const fetchedState = po.State || '';
+        setCity(fetchedDistrict);
+        setState(fetchedState);
         setPincodeError('');
+        if (fetchedDistrict && fetchedDistrict !== city) {
+          fetchDistrictPincodes(fetchedDistrict);
+        }
       } else {
-        setPincodeError('Pincode not found. Please enter city/state manually.');
+        setPincodeError('Pincode not found. Please select district/state manually.');
       }
     } catch {
-      setPincodeError('Could not fetch pincode data. Please enter manually.');
+      setPincodeError('Could not fetch pincode data. Please select manually.');
     }
     setPincodeLoading(false);
   };
@@ -184,6 +235,7 @@ export default function AddCollectionPage() {
       setState('');
       setPincode('');
       setPincodeError('');
+      setDistrictPincodes([]);
       setAmount('');
       setPaymentMode('Cash');
       setRemark('');
@@ -293,15 +345,62 @@ export default function AddCollectionPage() {
               </div>
 
               <div>
-                <label className="block text-gray-600 text-sm font-medium mb-1">Pincode</label>
+                <label className="block text-gray-600 text-sm font-medium mb-1">
+                  State
+                  {state && <span className="text-green-500 ml-1 text-xs">✓</span>}
+                </label>
+                <select
+                  value={state}
+                  onChange={(e) => handleStateChange(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400 bg-white"
+                >
+                  <option value="">Select State</option>
+                  {INDIA_STATES.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-600 text-sm font-medium mb-1">
+                  District
+                  {city && <span className="text-green-500 ml-1 text-xs">✓</span>}
+                </label>
+                <select
+                  value={city}
+                  onChange={(e) => handleDistrictChange(e.target.value)}
+                  disabled={!state}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">{state ? 'Select District' : 'Select State first'}</option>
+                  {(INDIA_DISTRICTS[state] ?? []).map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-600 text-sm font-medium mb-1">
+                  Pincode
+                  {districtPincodesLoading && <span className="text-orange-400 ml-1 text-xs">Fetching pincodes...</span>}
+                  {!districtPincodesLoading && districtPincodes.length > 0 && (
+                    <span className="text-green-500 ml-1 text-xs">{districtPincodes.length} pincodes available</span>
+                  )}
+                </label>
                 <div className="relative">
                   <input
                     type="tel"
-                    placeholder="Enter 6-digit pincode"
+                    list="pincode-options"
+                    placeholder={city ? `Enter or select pincode for ${city}` : 'Enter 6-digit pincode'}
                     value={pincode}
                     onChange={(e) => lookupPincode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400"
                   />
+                  <datalist id="pincode-options">
+                    {districtPincodes.map(p => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
                   {pincodeLoading && (
                     <span className="absolute right-3 top-3.5 text-orange-400 text-sm">Looking up...</span>
                   )}
@@ -309,27 +408,6 @@ export default function AddCollectionPage() {
                 {pincodeError && (
                   <p className="text-orange-500 text-xs mt-1">{pincodeError}</p>
                 )}
-              </div>
-
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="block text-gray-600 text-sm font-medium mb-1">
-                    District / City
-                    {city && <span className="text-green-500 ml-1 text-xs">✓ auto-filled</span>}
-                  </label>
-                  <input type="text" placeholder="District / City" value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-gray-600 text-sm font-medium mb-1">
-                    State
-                    {state && <span className="text-green-500 ml-1 text-xs">✓ auto-filled</span>}
-                  </label>
-                  <input type="text" placeholder="State" value={state}
-                    onChange={(e) => setState(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />
-                </div>
               </div>
 
               <div>

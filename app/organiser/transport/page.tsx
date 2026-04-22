@@ -162,14 +162,14 @@ export default function OrganiserTransportPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
-                        <input type="text" placeholder="Driver name"
+                        <label className="block text-xs text-gray-500 mb-1">Volunteer Name</label>
+                        <input type="text" placeholder="Volunteer name"
                           value={s.driverName}
                           onChange={e => updateField(s.phone, 'driverName', e.target.value)}
                           className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-400" />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Driver Phone</label>
+                        <label className="block text-xs text-gray-500 mb-1">Volunteer Phone</label>
                         <input type="tel" placeholder="+91..."
                           value={s.driverPhone}
                           onChange={e => updateField(s.phone, 'driverPhone', e.target.value)}

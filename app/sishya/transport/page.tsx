@@ -109,7 +109,7 @@ export default function TransportPage() {
                 <div className="flex items-start gap-3">
                   <span className="text-orange-400 text-xl">👤</span>
                   <div>
-                    <p className="text-xs text-gray-400">Driver Name</p>
+                    <p className="text-xs text-gray-400">Volunteer Name</p>
                     <p className="text-gray-700 font-medium">{transport.driverName}</p>
                   </div>
                 </div>
@@ -119,7 +119,7 @@ export default function TransportPage() {
                 <div className="flex items-start gap-3">
                   <span className="text-orange-400 text-xl">📞</span>
                   <div>
-                    <p className="text-xs text-gray-400">Driver Phone</p>
+                    <p className="text-xs text-gray-400">Volunteer Phone</p>
                     <p className="text-gray-700 font-medium">{transport.driverPhone}</p>
                   </div>
                 </div>
@@ -127,11 +127,11 @@ export default function TransportPage() {
 
             </div>
 
-            {/* Call Driver Button */}
+            {/* Call Volunteer Button */}
             {transport.driverPhone && (
               <a href={`tel:${transport.driverPhone}`}
                 className="w-full bg-green-500 text-white font-bold py-4 rounded-2xl text-base flex items-center justify-center gap-2">
-                <span>📞</span> Call Driver
+                <span>📞</span> Call Volunteer
               </a>
             )}
 

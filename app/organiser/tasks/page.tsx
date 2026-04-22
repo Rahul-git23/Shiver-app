@@ -64,7 +64,12 @@ export default function TasksPage() {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const d = new Date(dateStr);
+    const datePart = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const hasTime = dateStr.includes('T');
+    if (!hasTime) return datePart;
+    const timePart = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${datePart}, ${timePart}`;
   };
 
   const isOverdue = (dateStr: string, status: string) => {

@@ -1,10 +1,19 @@
- 'use client';
+'use client';
 
-import { useEffect, useState } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { useEffect, useRef, useState } from 'react';
+import { auth, db, storage } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { createNotificationForMany } from '@/lib/notifications';
+
+type AttachmentType = 'image' | 'pdf';
+interface Attachment {
+  file: File;
+  previewUrl: string;
+  type: AttachmentType;
+  name: string;
+}
 
 const DEFAULT_CATEGORIES = [
   'Hall/Venue', 'Food/Prasad', 'Decoration', 'Sound/Lighting',
@@ -27,6 +36,9 @@ export default function AddExpensePage() {
   const [remarks, setRemarks] = useState('');
   const [phase, setPhase] = useState<'planning' | 'approved'>('planning');
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -52,6 +64,20 @@ export default function AddExpensePage() {
     return () => unsubscribe();
   }, []);
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, type: AttachmentType) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachments(prev => [...prev, { file, previewUrl: URL.createObjectURL(file), type, name: file.name }]);
+    e.target.value = '';
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => {
+      URL.revokeObjectURL(prev[index].previewUrl);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
   const addCustomCategory = () => {
     if (!customCategory.trim()) return;
     const newCat = customCategory.trim();
@@ -70,6 +96,15 @@ export default function AddExpensePage() {
 
     setSaving(true);
     try {
+      const uploadedAttachments = await Promise.all(
+        attachments.map(async (att) => {
+          const fileRef = storageRef(storage, `expenses/${shivir.id}/${Date.now()}_${att.name}`);
+          await uploadBytes(fileRef, att.file);
+          const url = await getDownloadURL(fileRef);
+          return { url, type: att.type, name: att.name };
+        })
+      );
+
       await addDoc(collection(db, 'expenses'), {
         shivirId: shivir.id,
         shivirName: shivir.name,
@@ -78,6 +113,7 @@ export default function AddExpensePage() {
         estimatedAmount: Number(estimatedAmount),
         remarks: remarks.trim(),
         phase,
+        attachments: uploadedAttachments,
         status: 'pending',
         proposedBy: userData.phone,
         proposedByName: userData.name,
@@ -216,7 +252,7 @@ export default function AddExpensePage() {
           </div>
 
           {/* Remarks */}
-          <div className="mb-6">
+          <div className="mb-4">
             <label className="block text-gray-600 text-sm font-medium mb-1">
               Remarks (Optional)
             </label>
@@ -225,6 +261,46 @@ export default function AddExpensePage() {
               onChange={(e) => setRemarks(e.target.value)}
               rows={3}
               className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-orange-400" />
+          </div>
+
+          {/* Attachments */}
+          <div className="mb-6">
+            <label className="block text-gray-600 text-sm font-medium mb-2">
+              Attachments (Optional)
+              {attachments.length > 0 && <span className="text-orange-500 ml-1 text-xs">{attachments.length} added</span>}
+            </label>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <button type="button" onClick={() => imageInputRef.current?.click()}
+                className="flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-50 text-blue-600 text-sm font-medium hover:bg-blue-100 transition-colors">
+                <span className="text-lg">📷</span> Add Photo
+              </button>
+              <button type="button" onClick={() => pdfInputRef.current?.click()}
+                className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-50 text-red-600 text-sm font-medium hover:bg-red-100 transition-colors">
+                <span className="text-lg">📄</span> Add PDF
+              </button>
+            </div>
+            <input ref={imageInputRef} type="file" accept="image/*" className="hidden"
+              onChange={(e) => handleFileSelect(e, 'image')} />
+            <input ref={pdfInputRef} type="file" accept="application/pdf" className="hidden"
+              onChange={(e) => handleFileSelect(e, 'pdf')} />
+
+            {attachments.length > 0 && (
+              <div className="space-y-2">
+                {attachments.map((att, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2 border border-gray-200">
+                    {att.type === 'image' ? (
+                      <img src={att.previewUrl} alt="attachment"
+                        className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0 text-2xl">📄</div>
+                    )}
+                    <p className="flex-1 text-xs text-gray-600 truncate">{att.name}</p>
+                    <button type="button" onClick={() => removeAttachment(i)}
+                      className="text-red-400 hover:text-red-600 font-bold text-lg px-1 flex-shrink-0">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {message && (
